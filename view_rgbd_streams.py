@@ -33,20 +33,21 @@ def open_astra_colour_camera() -> tuple[cv2.VideoCapture | None, bool]:
     Locate and open the Orbbec Astra Pro HD Camera (not the laptop built-in cam).
     Returns (cap, found_ok).
     """
-    # Astra is at index 1 (built-in laptop cam is index 0)
-    print("[colour] Trying camera index 1 (Astra)...", flush=True)
-    for backend in (cv2.CAP_MSMF, cv2.CAP_DSHOW):
-        try:
-            c = cv2.VideoCapture(1, backend)
-            if c.isOpened():
-                ret, frm = c.read()
-                if ret and frm is not None:
-                    w, h = int(c.get(cv2.CAP_PROP_FRAME_WIDTH)), int(c.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                    print(f"[colour] Opened index=1 backend={backend}  {w}x{h}", flush=True)
-                    return c, True
-                c.release()
-        except Exception as e:
-            print(f"[colour] index 1 backend {backend} error: {e}", flush=True)
+    # Never use index 0 (built-in laptop cam). Astra is usually index 1, but can shift.
+    for idx in (1, 2, 3, 4):
+        for backend in (cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY):
+            print(f"[colour] Trying camera index {idx} backend={backend}...", flush=True)
+            try:
+                c = cv2.VideoCapture(idx, backend)
+                if c.isOpened():
+                    ret, frm = c.read()
+                    if ret and frm is not None:
+                        w, h = int(c.get(cv2.CAP_PROP_FRAME_WIDTH)), int(c.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        print(f"[colour] Opened index={idx} backend={backend}  {w}x{h}", flush=True)
+                        return c, True
+                    c.release()
+            except Exception as e:
+                print(f"[colour] index {idx} backend {backend} error: {e}", flush=True)
     
     print("[colour] WARNING: Astra colour camera not found – showing grey placeholder", flush=True)
     return None, False

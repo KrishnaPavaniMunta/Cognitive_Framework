@@ -5,7 +5,7 @@
 .DESCRIPTION
     Runs rgbd_spatial_twin.py from the organized hospital_detector_longterm/rgbd_development folder
 .PARAMETER Command
-    Command to run: view, export, view-db, etc.
+    Command to run: view, export, view-db, live, etc.
 .PARAMETER Sequence
     Which sequence: freiburg1 (default) or freiburg3
 .PARAMETER Frames
@@ -43,6 +43,9 @@ $SequencePath = $SequencePaths[$Sequence]
 $DbPath = "$OutputDir\hospital_twin.db"
 $PythonScript = "$ScriptsDir\rgbd_spatial_twin.py"
 $Python = "C:/Users/Krishna.Munta/AppData/Local/Python/pythoncore-3.14-64/python.exe"
+$LiveScript = "view_rgbd_streams.py"
+$LivePython = ".\.orbbec-311v1\Scripts\python.exe"
+$OpenNiRedist = "C:\Users\Krishna.Munta\Downloads\Orbbec_OpenNI_v2.3.0.86-beta6_windows_release\OpenNI_2.3.0.86_202210111950_4c8f5aa4_beta6_windows\OpenNI_2.3.0.86_202210111950_4c8f5aa4_beta6_windows\Win64-Release\sdk\libs"
 
 New-Item -ItemType Directory -Path $ExportDir, $DetectionDir, $LogDir -Force | Out-Null
 
@@ -50,6 +53,26 @@ New-Item -ItemType Directory -Path $ExportDir, $DetectionDir, $LogDir -Force | O
 $Args = @("$PythonScript", "--sequence-root", $SequencePath)
 
 switch ($Command) {
+    "live" {
+        if (-not (Test-Path $LiveScript)) {
+            Write-Host "Error: Live viewer script '$LiveScript' not found in workspace root." -ForegroundColor Red
+            exit 1
+        }
+        if (-not (Test-Path $LivePython)) {
+            Write-Host "Error: Python env '$LivePython' not found. Ensure .orbbec-311v1 exists." -ForegroundColor Red
+            exit 1
+        }
+        if (-not (Test-Path $OpenNiRedist)) {
+            Write-Host "Error: OPENNI2_REDIST path not found: $OpenNiRedist" -ForegroundColor Red
+            exit 1
+        }
+
+        $env:OPENNI2_REDIST = $OpenNiRedist
+        Write-Host "Launching live Astra RGB + depth viewer..." -ForegroundColor Cyan
+        Write-Host "Press Q in the viewer window to quit." -ForegroundColor Yellow
+        & $LivePython -u $LiveScript
+        exit $LASTEXITCODE
+    }
     "view" {
         $Args += "--no-db", "--wait-ms", "15"
         Write-Host "Viewing $Sequence RGB-D stream..." -ForegroundColor Cyan
@@ -78,6 +101,7 @@ switch ($Command) {
         Write-Host "Unknown command: $Command" -ForegroundColor Red
         Write-Host ""
         Write-Host "Available commands:" -ForegroundColor Yellow
+        Write-Host "  live       - Launch live Astra RGB + depth side-by-side viewer" -ForegroundColor White
         Write-Host "  view       - View RGB-D stream (no database)" -ForegroundColor White
         Write-Host "  export     - Export RGB-D to MP4 (no database)" -ForegroundColor White
         Write-Host "  view-db    - View RGB-D with spatial memory logging" -ForegroundColor White

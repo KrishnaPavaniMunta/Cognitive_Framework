@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-syntax-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate Python syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=$(git ls-files '*.py')
+          if [ -z "$files" ]; then
+            echo "No Python files tracked; skipping."
+            exit 0
+          fi
+          python -m py_compile $files
+          echo "Syntax check passed for tracked Python files."
