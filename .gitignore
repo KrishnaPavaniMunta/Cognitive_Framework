@@ -1,0 +1,58 @@
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# IDE/editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local databases and logs
+*.db
+*.db-journal
+*.log
+
+# Model artifacts and large binaries
+models/
+*.pt
+*.onnx
+*.engine
+*.ckpt
+
+# Datasets and generated assets
+_archive/
+datasets/
+Testing Images/
+Testing Videos/
+hospital_detector_longterm/Data/
+hospital_detector_longterm/rgbd_development/data/
+hospital_detector_longterm/rgbd_development/output/
+
+# Training and inference outputs
+outputs/
+results/
+runs/
+validation_results/
+Log/
+
+# Optional notebook checkpoints
+.ipynb_checkpoints/
+
+# Large local media/docs often used for testing or reporting
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.pptx
