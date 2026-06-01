@@ -39,20 +39,11 @@ models/
 # Datasets and generated assets
 _archive/
 datasets/
-saxon/
-analysis_frames/
 Testing Images/
 Testing Videos/
-**/hospital_detector_longterm/Data/
-**/hospital_detector_longterm/rgbd_development/data/
-**/hospital_detector_longterm/rgbd_development/output/
-
-# Large binary/archive files
-*.tgz
-*.tar.gz
-*.zip
-*.ply
-*.bag
+hospital_detector_longterm/Data/
+hospital_detector_longterm/rgbd_development/data/
+hospital_detector_longterm/rgbd_development/output/
 
 # Training and inference outputs
 outputs/
