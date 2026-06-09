@@ -94,9 +94,10 @@ VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
 
 # ── Grounding DINO config ──────────────────────────────────────────────────────
 DINO_MODEL_ID        = "IDEA-Research/grounding-dino-base"
-DINO_DEVICE          = "cuda" if torch.cuda.is_available() else "cpu"
+DINO_DEVICE          = "cuda"
 DINO_TEXT_THR        = 0.25   # text-alignment threshold (shared)
-DINO_VIDEO_INTERVAL_SEC = 1.75   # refresh DINO a bit faster without carrying stale boxes
+DINO_VIDEO_INTERVAL_SEC = 1.0   # motion stabilizer horizon (~15 frames at 15 FPS)
+DINO_VIDEO_INTERVAL_FRAMES = 15  # run DINO once every 15 frames
 
 # Hospital-relevant weak classes only (AP50 < 0.25 or user-requested).
 # COCO-only classes that never appear in hospitals (hair drier, toothbrush,
@@ -287,6 +288,16 @@ CLASS_NAMES: list[str] = sorted([
 ])
 CLASS_TO_ID: dict[str, int] = {name: i for i, name in enumerate(CLASS_NAMES)}
 
+# Normalize ambiguous/general COCO labels to hospital-specific classes.
+CLASS_ALIASES: dict[str, str] = {
+    "tv": "monitor_hosp",
+    "bed": "hospital_bed",
+}
+
+
+def _canonical_class_name(name: str) -> str:
+    return CLASS_ALIASES.get(name, name)
+
 # ── Excel layout (mirrors infer_v3.py / infer_ensemble.py) ────────────────────
 FIXED_HEADERS = [
     "Image ID",
@@ -337,14 +348,14 @@ def ensemble_infer(v1: YOLO, v3: YOLO, img_path: Path) -> dict:
     v1_dets: dict[str, list] = defaultdict(list)
     if r1.boxes is not None:
         for box in r1.boxes:
-            name = v1.names[int(box.cls)]
+            name = _canonical_class_name(v1.names[int(box.cls)])
             xyxy = box.xyxy[0].cpu().tolist()
             v1_dets[name].append((*xyxy, float(box.conf)))
 
     v3_dets: dict[str, list] = defaultdict(list)
     if r3.boxes is not None:
         for box in r3.boxes:
-            name = v3.names[int(box.cls)]
+            name = _canonical_class_name(v3.names[int(box.cls)])
             xyxy = box.xyxy[0].cpu().tolist()
             v3_dets[name].append((*xyxy, float(box.conf)))
 
@@ -431,7 +442,7 @@ def _yolo_sahi_supplement(v1: YOLO, v3: YOLO, img_path: Path) -> dict:
                 if result.boxes is None:
                     continue
                 for box in result.boxes:
-                    name = model.names[int(box.cls)]
+                    name = _canonical_class_name(model.names[int(box.cls)])
                     if name not in YOLO_SAHI_CLASSES:
                         continue
                     bx1, by1, bx2, by2 = box.xyxy[0].cpu().tolist()
@@ -1454,9 +1465,9 @@ def run_video(v1: YOLO, v3: YOLO, video_path: Path, out_path: Path) -> dict:
     motion_state: dict = {}                          # worker-anchored PPE motion stabilizer state
     last_tracked_sv: sv.Detections | None = None     # carry-forward detections on glare frames
     frame_idx = 0
-    dino_frame_interval = max(1, round(fps * DINO_VIDEO_INTERVAL_SEC))
+    dino_frame_interval = max(1, int(DINO_VIDEO_INTERVAL_FRAMES))
     print(f"  Video: {width}x{height} @ {fps:.1f} fps  ({total} frames)")
-    print(f"  DINO fires every {dino_frame_interval} frames (~{DINO_VIDEO_INTERVAL_SEC}s) for missed weak classes.")
+    print(f"  DINO fires every {dino_frame_interval} frames (~{dino_frame_interval / max(fps, 1e-6):.2f}s) for missed weak classes.")
 
     while True:
         ret, bgr = cap.read()
@@ -1562,14 +1573,14 @@ def _yolo_on_frame(v1: YOLO, v3: YOLO, bgr: np.ndarray) -> dict:
     v1_dets: dict[str, list] = defaultdict(list)
     if r1.boxes is not None:
         for box in r1.boxes:
-            name = v1.names[int(box.cls)]
+            name = _canonical_class_name(v1.names[int(box.cls)])
             xyxy = box.xyxy[0].cpu().tolist()
             v1_dets[name].append((*xyxy, float(box.conf)))
 
     v3_dets: dict[str, list] = defaultdict(list)
     if r3.boxes is not None:
         for box in r3.boxes:
-            name = v3.names[int(box.cls)]
+            name = _canonical_class_name(v3.names[int(box.cls)])
             xyxy = box.xyxy[0].cpu().tolist()
             v3_dets[name].append((*xyxy, float(box.conf)))
 
@@ -1726,16 +1737,21 @@ def run_image(v1: YOLO, v3: YOLO, media_path: Path,
 
 
 def main():
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA GPU is required. This pipeline is configured for GPU-only YOLO and DINO.")
+
     print("Loading V1 (106-class hospital)...")
     v1 = YOLO(str(V1_PATH))
     print("Loading V3 (109-class)...")
     v3 = YOLO(str(V3_PATH))
+    v1.to("cuda")
+    v3.to("cuda")
 
     print("\nHospitalGuard-109 ready.")
     print(f"  V1+V3 NMS overlap : {sorted(V3_WORKING_OVERLAP)}")
     print(f"  V3-only classes   : {sorted(V3_ONLY_NEW)}")
     print(f"  DINO fallback     : {sorted(DINO_FALLBACK.keys())}  (AP50 < 0.25)")
-    print(f"  DINO video rate   : every {DINO_VIDEO_INTERVAL_SEC}s (per-frame interval computed at runtime)")
+    print(f"  DINO video rate   : every {DINO_VIDEO_INTERVAL_FRAMES} frames")
     print(f"  Output dir        : {OUT_DIR.relative_to(ROOT_DIR)}")
     print(f"  Excel log         : {EXCEL_PATH.relative_to(ROOT_DIR)}")
     print(f"\nPaste an image or video URL (or 'quit' to exit).\n")

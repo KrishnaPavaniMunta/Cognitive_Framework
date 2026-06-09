@@ -26,26 +26,6 @@ This repository contains training, inference, evaluation, and RGB-D temporal dev
 pip install -r requirements.txt
 ```
 
-### Orbbec OpenNI + Strict GPU (RTX 5090)
-
-Use the pinned Orbbec requirements file when running the OpenNI camera path with strict GPU execution.
-
-```powershell
-.\.orbbec-311v1\Scripts\python.exe -m pip install -r requirements.orbbec-311v1-cu128.txt
-```
-
-Set the OpenNI runtime path before launch:
-
-```powershell
-$env:OPENNI2_REDIST="C:\Users\Krishna.Munta\Downloads\Orbbec_OpenNI_v2.3.0.86-beta6_windows_release\Orbbec_OpenNI_v2.3.0.86-beta6_windows_release\Win64-Release\sdk\libs"
-```
-
-Launch strict GPU Orbbec inference:
-
-```powershell
-.\.orbbec-311v1\Scripts\python.exe .\hospital_detector_longterm\rgbd_development\scripts\rgbd_hospitalguard_temporal_orbbec.py --backend openni --color-index -1 --gpu-required --yolo-half
-```
-
 ## Quick Start
 
 ### 1) Train a model
