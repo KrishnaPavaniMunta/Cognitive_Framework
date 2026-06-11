@@ -30,6 +30,7 @@ Thumbs.db
 *.log
 
 # Model artifacts and large binaries
+models/
 *.onnx
 *.engine
 *.ckpt
@@ -37,23 +38,13 @@ Thumbs.db
 # Datasets and generated assets
 _archive/
 datasets/
-saxon/
-analysis_frames/
 Testing Images/
 Testing Videos/
-**/hospital_detector_longterm/Data/
-**/hospital_detector_longterm/rgbd_development/data/
-**/hospital_detector_longterm/rgbd_development/output/
-
-# Large binary/archive files
-*.tgz
-*.tar.gz
-*.zip
-*.ply
-*.bag
+hospital_detector_longterm/Data/
+hospital_detector_longterm/rgbd_development/data/
+hospital_detector_longterm/rgbd_development/output/
 
 # Training and inference outputs
-**/AD_Rules_Outputs/
 outputs/
 results/
 runs/
@@ -69,3 +60,11 @@ Log/
 *.avi
 *.mkv
 *.pptx
+
+# Reorganized Cognitive Recognition framework large assets
+Cognitive Recognition framework/01_codebase/04_rgbd_and_spatial_twin/hospital_detector_longterm/Data/
+Cognitive Recognition framework/01_codebase/04_rgbd_and_spatial_twin/hospital_detector_longterm/rgbd_development/data/
+Cognitive Recognition framework/01_codebase/04_rgbd_and_spatial_twin/hospital_detector_longterm/rgbd_development/output/
+Cognitive Recognition framework/02_datasets/
+Cognitive Recognition framework/08_media_and_3d_assets/
+slam_output.ply
