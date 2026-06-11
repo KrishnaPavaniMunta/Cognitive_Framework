@@ -69,9 +69,10 @@ from openpyxl.utils import get_column_letter
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 BASE_DIR   = Path(__file__).parent.resolve()
-ROOT_DIR   = BASE_DIR.parent   # yolo_tr/ — where outputs/ and models/ live
-V1_PATH    = ROOT_DIR / "outputs/runs/hospital/phase2_neck_head/weights/best.pt"
-V3_PATH    = ROOT_DIR / "outputs/runs/hospital_v3/phase2_neck_head/weights/best.pt"
+ROOT_DIR   = BASE_DIR.parent   # hospital_detector_temporal/ parent (04_rgbd_and_spatial_twin/)
+REPO_ROOT  = ROOT_DIR.parent.parent.parent  # Cognitive Recognition framework/
+V1_PATH    = REPO_ROOT / "03_models_and_weights/models/yolo_trained_v1.pt"
+V3_PATH    = REPO_ROOT / "03_models_and_weights/models/yolo_trained_v3.pt"
 OUT_DIR    = ROOT_DIR / "outputs/hospitalguard_output"
 EXCEL_PATH = ROOT_DIR / "outputs/hospitalguard_log.xlsx"
 OUTPUT_RUN_TAG = "upd_motion_stab_v1"

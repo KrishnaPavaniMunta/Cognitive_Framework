@@ -2,6 +2,54 @@
 
 This repository contains training, inference, evaluation, and RGB-D temporal development scripts for the HospitalGuard object detection pipeline.
 
+---
+
+## Model Weights
+
+The inference pipeline uses an **ensemble of two custom-trained YOLO models** (V1 and V3) plus a zero-shot fallback from Grounding DINO.
+
+### YOLO V1 — Hospital Safety Model (Phase 1)
+
+Trained on core hospital safety objects including PPE, clinical equipment, furniture, and access-control fixtures (80 COCO classes + 26 hospital-specific classes = **106 classes total**).
+
+Key classes: `glove`, `healthcare_worker`, `hospital_bed`, `infusion_pump`, `iv_stand`, `wheelchair`, `door`, `fire_extinguisher`, `mask`, `hair_net`, `surgical_scissor`, `patient`, `security_camera`, and more.
+
+**Weight file:**
+```
+03_models_and_weights/models/yolo_trained_v1.pt
+```
+
+### YOLO V3 — Extended Hospital Model (Phase 2)
+
+Builds on V1 with additional hazard and navigation classes introduced in the v3 dataset. Fully backward-compatible with V1 classes.
+
+Additional classes over V1: `bag`, `exit_sign`, `spillage` (classes 106–108).
+
+**Weight file:**
+```
+03_models_and_weights/models/yolo_trained_v3.pt
+```
+
+### Ensemble Routing Logic
+
+| Classes | Source |
+|---|---|
+| `wheelchair`, `door`, `fire_extinguisher` | V1 + V3 detections pooled → NMS |
+| `bag`, `exit_sign`, `spillage` | V3 only (not in V1 vocabulary) |
+| All other classes | V1 primary, V3 as supplement |
+
+### Grounding DINO — Zero-Shot Fallback
+
+Used as a fallback layer for weak or missed detections on difficult classes (e.g. `surgical_scissor`, `hair_net`, `glove`).
+
+**No local weight file.** The model is downloaded automatically from Hugging Face Hub at runtime:
+```
+IDEA-Research/grounding-dino-base
+```
+Weights are cached in your local HuggingFace cache (`~/.cache/huggingface/`). No `.pt` file is committed to this repository.
+
+---
+
 ## Project Highlights
 
 - YOLO-based training/inference for hospital safety classes
