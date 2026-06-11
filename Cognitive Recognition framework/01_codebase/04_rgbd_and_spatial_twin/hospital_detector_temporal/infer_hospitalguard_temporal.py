@@ -92,12 +92,53 @@ V3_ONLY_NEW        = {"bag", "exit_sign", "spillage"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v"}
 
+# ── Exit-blocking alert config ───────────────────────────────────────────────
+# Alert when a tracked asset blocks the exit zone longer than this duration.
+EXIT_BLOCK_THRESHOLD_SEC = 5.0
+# ROI can be supplied either as absolute pixels or normalized (0..1) points.
+# For production, replace this with an interactive polygon/box selector.
+EXIT_ROI_ABS: list[tuple[int, int]] | None = None
+EXIT_ROI_NORM: list[tuple[float, float]] = [
+    (0.75, 0.15),
+    (0.98, 0.15),
+    (0.98, 0.85),
+    (0.75, 0.85),
+]
+# Ignore classes that should never count as exit blockage assets.
+EXIT_BLOCK_IGNORE_CLASSES: set[str] = {
+    "door", "exit_sign", "person", "healthcare_worker", "patient",
+    "mask", "glove", "hair_net",
+}
+
+# ── Door/exit-sign geometric consistency check ───────────────────────────────
+# A door is considered "signed" when at least one exit_sign is spatially above
+# and horizontally aligned with the doorway.
+DOOR_SIGN_X_MARGIN_FRAC = 0.20
+DOOR_SIGN_TOP_BAND_FRAC = 0.20
+DOOR_SIGN_MAX_ABOVE_FRAC = 0.60
+
+# Alert when an object obstructs a detected door region for too long.
+DOOR_BLOCK_THRESHOLD_SEC = 2.0
+DOOR_BLOCK_MIN_OVERLAP_DOOR_FRAC = 0.12
+# Prefer floor ROI blocking logic over vertical-door overlap blocking to avoid perspective false positives.
+DOOR_BLOCK_MONITOR_ENABLED = False
+DOOR_BLOCK_IGNORE_CLASSES: set[str] = {
+    "door", "exit_sign", "person", "healthcare_worker", "patient",
+    "mask", "glove", "hair_net",
+}
+
+# Keep detected egress boxes visible for this long even if detections flicker.
+EGRESS_BOX_HOLD_SEC = 6.0
+
 # ── Grounding DINO config ──────────────────────────────────────────────────────
 DINO_MODEL_ID        = "IDEA-Research/grounding-dino-base"
 DINO_DEVICE          = "cuda"
 DINO_TEXT_THR        = 0.25   # text-alignment threshold (shared)
 DINO_VIDEO_INTERVAL_SEC = 1.0   # motion stabilizer horizon (~15 frames at 15 FPS)
 DINO_VIDEO_INTERVAL_FRAMES = 15  # run DINO once every 15 frames
+
+# Classes that should be queried on every DINO interval regardless of YOLO.
+DINO_FORCE_CLASSES: set[str] = {"door", "exit_sign"}
 
 # Hospital-relevant weak classes only (AP50 < 0.25 or user-requested).
 # COCO-only classes that never appear in hospitals (hair drier, toothbrush,
@@ -131,7 +172,10 @@ DINO_FALLBACK: dict[str, tuple[str, float]] = {
     "iv_stand":         ("intravenous IV drip stand. metal pole with wheels and hanging bag hook.", 0.40),
     # exit_sign (AP50=0.797 V3 val): safety-critical anchor for egress monitoring.
     # DINO fallback catches signs in dim/angled corridors that confuse YOLO.
-    "exit_sign":        ("green rectangular exit sign. illuminated emergency exit sign on wall.", 0.42),
+    "exit_sign":        ("green illuminated exit sign above doorway.", 0.22),
+    # door: supplemental fallback for dim corridors and motion blur where YOLO
+    # misses doorway edges. Prompt keeps focus on architectural door features.
+    "door":             ("hospital corridor door.", 0.18),
     # iv_stand removed from YOLO-SAHI comment kept for reference:
     # DINO-tiny cannot distinguish IV poles from mic stands, coat racks,
     # floor lamps (all score 0.35–0.54 with any pole-based prompt). YOLO-only covers it.
@@ -152,14 +196,35 @@ DINO_FALLBACK: dict[str, tuple[str, float]] = {
 # on shared visual features (e.g. surgical_scissor vs knife both have blades,
 # glove vs baseball-glove share the word 'glove',
 # mask vs non-medical face covering, hair_net vs regular hat).
-DINO_ISOLATED: set[str] = {"surgical_scissor", "glove", "mask", "hair_net", "iv_stand", "medical_tray"}
+DINO_ISOLATED: set[str] = {"surgical_scissor", "glove", "mask", "hair_net", "iv_stand", "medical_tray", "exit_sign"}
 
 # Classes that use SAHI (sliced inference) + negative prompting.
 # SAHI slices large images into 640-px patches so small objects fill more of
 # the frame; negative prompting forces DINO to label confusable objects
-# (syringes, vials, pens) before the target phrase, suppressing FPs.
+# before the target phrase, suppressing FPs.
 # Format: canonical name → {phrase, distractors, threshold, slice_size, overlap}
 DINO_SAHI: dict[str, dict] = {
+    "person": {
+        "phrase":       "person. human standing in hospital corridor.",
+        "distractors":  ["chair", "bed", "stretcher", "wheelchair", "monitor", "door"],
+        "threshold":    0.30,
+        "slice_size":   768,
+        "overlap":      0.20,
+    },
+    "sink": {
+        "phrase":       "hospital sink. stainless steel sink with faucet on wall.",
+        "distractors":  ["toilet", "cabinet", "counter", "basin", "urinal", "mirror"],
+        "threshold":    0.28,
+        "slice_size":   640,
+        "overlap":      0.25,
+    },
+    "exit_sign": {
+        "phrase":       "green illuminated exit sign above doorway.",
+        "distractors":  ["window", "cabinet", "wall", "poster", "camera"],
+        "threshold":    0.20,
+        "slice_size":   640,
+        "overlap":      0.25,
+    },
     "test_tube": {
         "phrase":       "glass test tube. coloured rubber cap.",
         "distractors":  ["syringe", "vial", "glass bottle", "glass jar",
@@ -170,14 +235,26 @@ DINO_SAHI: dict[str, dict] = {
     },
 }
 
-# Classes where YOLO SAHI supplement runs at image-inference time.
+# Classes where YOLO SAHI supplement runs at image/video inference time.
 # Small objects that fill too few pixels at full resolution become clearly
 # visible when YOLO runs on a 640-px crop of just that region.
 # Only used in run_image() — video keeps every-frame full-resolution YOLO
 # to maintain throughput.
-YOLO_SAHI_CLASSES: set[str] = {"fire_extinguisher", "surgical_scissor", "iv_stand"}
+YOLO_SAHI_CLASSES: set[str] = {"fire_extinguisher", "surgical_scissor", "iv_stand", "person", "sink"}
 YOLO_SAHI_SLICE   = 640   # patch edge length in pixels
 YOLO_SAHI_OVERLAP = 0.25  # fraction overlap between adjacent patches
+YOLO_VIDEO_SAHI_INTERVAL_FRAMES = 15  # run YOLO SAHI once every 15 video frames
+
+# Synthetic door fallback from exit-sign geometry.
+# When door is missed but exit_sign is found, project a door ROI from the sign
+# down to the floor so obstruction logic can still operate reliably.
+EXIT_SIGN_TO_DOOR_WIDTH_SCALE = 6.0
+EXIT_SIGN_TO_DOOR_MIN_WIDTH_PX = 140
+EXIT_SIGN_TO_DOOR_MAX_WIDTH_FRAC = 0.55
+EXIT_SIGN_TO_DOOR_TOP_GAP_PX = 4
+EXIT_SIGN_TO_DOOR_HEIGHT_WIDTH_RATIO = 2.33
+EXIT_SIGN_TO_DOOR_CONF_SCALE = 0.70
+EXIT_SIGN_TO_DOOR_MIN_CONF = 0.18
 
 # Context anchors for DINO gating (two-step contextual verification).
 # DINO will only fire for a class if at least one of its anchor classes was
@@ -250,7 +327,8 @@ DINO_MAX_BOX_FRAC: dict[str, float] = {
     "mask":             0.08,   # face-sized object
     "hair_net":         0.08,   # head-sized object
     "iv_stand":         0.25,   # tall pole — narrow but tall
-    "exit_sign":        0.10,   # wall-mounted sign
+    "exit_sign":        0.20,   # allow larger sign boxes in wide corridor views
+    "door":             0.80,   # permit large doorway regions in hallway scenes
     "test_tube":        0.06,   # tiny object
     "radiator":         0.20,   # wall panel — reasonably large but not full-wall
     "medical_tray":     0.20,   # tray can fill a significant portion of frame if close
@@ -456,6 +534,103 @@ def _yolo_sahi_supplement(v1: YOLO, v3: YOLO, img_path: Path) -> dict:
         if nms_dets:
             result[cls] = nms_dets
     return result
+
+
+def _yolo_sahi_on_frame(v1: YOLO, v3: YOLO, bgr: np.ndarray) -> dict:
+    """
+    Run YOLO V1+V3 SAHI directly on a BGR frame for YOLO_SAHI_CLASSES.
+    Used in video mode at a reduced cadence to recover small/distant targets.
+    """
+    H, W = bgr.shape[:2]
+    step = int(YOLO_SAHI_SLICE * (1 - YOLO_SAHI_OVERLAP))
+    xs = sorted(set(list(range(0, max(1, W - YOLO_SAHI_SLICE + 1), step)) + [max(0, W - YOLO_SAHI_SLICE)]))
+    ys = sorted(set(list(range(0, max(1, H - YOLO_SAHI_SLICE + 1), step)) + [max(0, H - YOLO_SAHI_SLICE)]))
+
+    raw: dict[str, list] = defaultdict(list)
+    for x0 in xs:
+        for y0 in ys:
+            patch = bgr[y0:min(y0 + YOLO_SAHI_SLICE, H), x0:min(x0 + YOLO_SAHI_SLICE, W)]
+            r1 = v1(patch, conf=CONF, iou=IOU, verbose=False)[0]
+            r3 = v3(patch, conf=CONF, iou=IOU, verbose=False)[0]
+            for model, result in ((v1, r1), (v3, r3)):
+                if result.boxes is None:
+                    continue
+                for box in result.boxes:
+                    name = _canonical_class_name(model.names[int(box.cls)])
+                    if name not in YOLO_SAHI_CLASSES:
+                        continue
+                    bx1, by1, bx2, by2 = box.xyxy[0].cpu().tolist()
+                    raw[name].append((bx1 + x0, by1 + y0, bx2 + x0, by2 + y0, float(box.conf)))
+
+    result: dict[str, list] = {}
+    for cls, dets in raw.items():
+        nms_dets = _nms_merge(dets, IOU)
+        if nms_dets:
+            result[cls] = nms_dets
+    return result
+
+
+def _synth_doors_from_exit_signs(exit_sign_dets: list, frame_w: int, frame_h: int) -> list:
+    """
+    Build synthetic door boxes by extending detected exit-sign boxes to floor.
+    Returns list of (x1, y1, x2, y2, conf) for class 'door'.
+    """
+    if not exit_sign_dets:
+        return []
+
+    synth: list[tuple[float, float, float, float, float]] = []
+    max_w_px = frame_w * EXIT_SIGN_TO_DOOR_MAX_WIDTH_FRAC
+    for x1, y1, x2, y2, conf in exit_sign_dets:
+        sx1, sy1, sx2, sy2 = float(x1), float(y1), float(x2), float(y2)
+        sign_w = max(1.0, sx2 - sx1)
+        cx = (sx1 + sx2) * 0.5
+
+        door_w = max(EXIT_SIGN_TO_DOOR_MIN_WIDTH_PX, sign_w * EXIT_SIGN_TO_DOOR_WIDTH_SCALE)
+        door_w = min(door_w, max_w_px)
+        door_h = door_w * EXIT_SIGN_TO_DOOR_HEIGHT_WIDTH_RATIO
+
+        dx1 = max(0.0, cx - door_w * 0.5)
+        dx2 = min(float(frame_w - 1), cx + door_w * 0.5)
+        dy1 = min(float(frame_h - 2), sy2 + EXIT_SIGN_TO_DOOR_TOP_GAP_PX)
+        dy2 = min(float(frame_h - 1), dy1 + door_h)
+        if dx2 <= dx1 or dy2 <= dy1:
+            continue
+
+        dconf = max(EXIT_SIGN_TO_DOOR_MIN_CONF, min(0.99, float(conf) * EXIT_SIGN_TO_DOOR_CONF_SCALE))
+        synth.append((dx1, dy1, dx2, dy2, dconf))
+
+    return _nms_merge(synth, IOU)
+
+
+def _inject_synthetic_door(dets_dict: dict, frame_w: int, frame_h: int) -> list:
+    """
+    Add synthetic door detections for exit signs that do not have a visible door below.
+    Returns only the synthetic detections added in this call.
+    """
+    sign_dets = list(dets_dict.get("exit_sign", []))
+    if not sign_dets:
+        return []
+
+    existing_doors = list(dets_dict.get("door", []))
+    uncovered_signs: list = []
+    for s in sign_dets:
+        sign_box = np.asarray(s[:4], dtype=np.float32)
+        has_visible_door = any(
+            _is_exit_sign_above_door(np.asarray(d[:4], dtype=np.float32), sign_box)
+            for d in existing_doors
+        )
+        if not has_visible_door:
+            uncovered_signs.append(s)
+
+    if not uncovered_signs:
+        return []
+
+    synth = _synth_doors_from_exit_signs(uncovered_signs, frame_w, frame_h)
+    if not synth:
+        return []
+
+    dets_dict["door"] = _nms_merge(existing_doors + synth, IOU)
+    return synth
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -668,7 +843,7 @@ def _context_gate(missing_classes: list[str], yolo_dets: dict) -> list[str]:
     return gated
 
 
-def dino_infer(pil_image: Image.Image, missing_classes: list[str]) -> dict:
+def dino_infer(pil_image: Image.Image, missing_classes: list[str], context_dets: dict | None = None) -> dict:
     """
     Run Grounding DINO for the given canonical class names.
     Only called when YOLO returned zero boxes for those classes.
@@ -682,22 +857,37 @@ def dino_infer(pil_image: Image.Image, missing_classes: list[str]) -> dict:
     """
     _load_dino()
 
-    sahi_cls = [c for c in missing_classes if c in DINO_SAHI]
-    isolated = [c for c in missing_classes if c in DINO_ISOLATED and c not in DINO_SAHI]
-    joint    = [c for c in missing_classes if c not in DINO_ISOLATED and c not in DINO_SAHI]
+    context_dets = dict(context_dets or {})
     all_dets: dict[str, list] = {}
+
+    requested = list(dict.fromkeys(missing_classes))
+    for cls in DINO_FORCE_CLASSES:
+        if cls not in requested:
+            requested.append(cls)
+
+    sahi_cls = [c for c in requested if c in DINO_SAHI]
+    isolated = [c for c in requested if c in DINO_ISOLATED and c not in DINO_SAHI]
+    joint    = [c for c in requested if c not in DINO_ISOLATED and c not in DINO_SAHI]
 
     # ── SAHI passes (sliced + negative prompting, one class per call) ─────
     for cls in sahi_cls:
-        all_dets.update(_sahi_dino_query(pil_image, cls))
+        result = _sahi_dino_query(pil_image, cls)
+        if result:
+            all_dets.update(result)
+            context_dets.update(result)
 
     # ── Joint pass (all non-isolated, non-SAHI classes together) ─────────
+    joint = _context_gate(joint, context_dets)
     if joint:
         p2c = {DINO_FALLBACK[c][0]: c for c in joint}
         p2t = {DINO_FALLBACK[c][0]: DINO_FALLBACK[c][1] for c in joint}
-        all_dets.update(_dino_query(pil_image, p2c, p2t))
+        result = _dino_query(pil_image, p2c, p2t)
+        if result:
+            all_dets.update(result)
+            context_dets.update(result)
 
     # ── Isolated passes (one class per call, no prompt competition) ───────
+    isolated = _context_gate(isolated, context_dets)
     for cls in isolated:
         phrase, thr = DINO_FALLBACK[cls]
         result = _dino_query(pil_image, {phrase: cls}, {phrase: thr})
@@ -711,7 +901,8 @@ def dino_infer(pil_image: Image.Image, missing_classes: list[str]) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _dets_to_sv(dets_dict: dict,
-                dino_classes: set[str] | None = None) -> sv.Detections | None:
+                dino_classes: set[str] | None = None,
+                synthetic_classes: set[str] | None = None) -> sv.Detections | None:
     """
     Convert {class_name: [(x1,y1,x2,y2,conf),...]} into a single sv.Detections
     object using the stable CLASS_TO_ID mapping.
@@ -720,7 +911,8 @@ def _dets_to_sv(dets_dict: dict,
     they still get tracked rather than silently dropped.
 
     dino_classes: optional set of class names that came from DINO rather than YOLO.
-    Their source is stored in det.data["source"] as "dino"; all others as "yolo".
+    synthetic_classes: optional set of class names injected by geometric projection.
+    Source is stored in det.data["source"] as "yolo" | "dino" | "synthetic".
     This lets _annotate_tracked() keep DINO boxes orange after tracking.
 
     Returns None when dets_dict is empty.
@@ -728,7 +920,12 @@ def _dets_to_sv(dets_dict: dict,
     boxes, confs, class_ids, names_list, sources = [], [], [], [], []
     for cls, det_list in dets_dict.items():
         cid = CLASS_TO_ID.get(cls, 0)
-        src = "dino" if (dino_classes and cls in dino_classes) else "yolo"
+        if synthetic_classes and cls in synthetic_classes:
+            src = "synthetic"
+        elif dino_classes and cls in dino_classes:
+            src = "dino"
+        else:
+            src = "yolo"
         for (x1, y1, x2, y2, conf) in det_list:
             boxes.append([x1, y1, x2, y2])
             confs.append(conf)
@@ -776,10 +973,202 @@ def _build_sv_detections(dets_dict: dict):
     return detections, names
 
 
+def _draw_alert_banner(scene: np.ndarray, lines: list[str]) -> np.ndarray:
+    """Draw a high-visibility warning banner in the top-left corner."""
+    if not lines:
+        return scene
+
+    overlay = scene.copy()
+    h, w = scene.shape[:2]
+    font_scale = max(0.45, min(0.8, w / 1500))
+    thickness = 2
+    pad = 12
+    line_gap = 8
+
+    sizes = [cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0] for text in lines]
+    max_w = max((tw for tw, _ in sizes), default=0)
+    total_h = sum(th for _, th in sizes) + line_gap * max(0, len(lines) - 1)
+    box_w = min(w - 20, max_w + pad * 2)
+    box_h = min(h - 20, total_h + pad * 2)
+
+    cv2.rectangle(overlay, (10, 10), (10 + box_w, 10 + box_h), (0, 0, 180), -1)
+    cv2.rectangle(overlay, (10, 10), (10 + box_w, 10 + box_h), (255, 255, 255), 2)
+    cv2.addWeighted(overlay, 0.55, scene, 0.45, 0, scene)
+
+    y = 10 + pad + sizes[0][1]
+    for idx, text in enumerate(lines):
+        cv2.putText(
+            scene,
+            text,
+            (10 + pad, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            (255, 255, 255),
+            thickness,
+            cv2.LINE_AA,
+        )
+        if idx + 1 < len(lines):
+            y += sizes[idx + 1][1] + line_gap
+
+    return scene
+
+
+def _door_block_counts_from_boxes(door_boxes: list[np.ndarray], candidate_boxes: list[np.ndarray]) -> tuple[int, int]:
+    """Return (blocked_doors, total_doors) using overlap against the door area."""
+    if not door_boxes:
+        return 0, 0
+
+    blocked = 0
+    for door_box in door_boxes:
+        door_area = max(1.0, float((door_box[2] - door_box[0]) * (door_box[3] - door_box[1])))
+        if any((_intersection_area(door_box, obj_box) / door_area) >= DOOR_BLOCK_MIN_OVERLAP_DOOR_FRAC for obj_box in candidate_boxes):
+            blocked += 1
+    return blocked, len(door_boxes)
+
+
+def _update_persistent_egress_state(
+    egress_state: dict,
+    tracked_sv: sv.Detections,
+    frame_idx: int,
+    hold_frames: int,
+) -> None:
+    """Persist door/exit_sign boxes for a short hold window to smooth flicker."""
+    classes = ("door", "exit_sign")
+    class_names = tracked_sv.data.get("class_name", np.array([])) if tracked_sv is not None and len(tracked_sv) > 0 else np.array([])
+
+    for cls in classes:
+        current_boxes = []
+        if tracked_sv is not None and len(tracked_sv) > 0:
+            for i, name in enumerate(class_names):
+                if str(name) == cls:
+                    current_boxes.append(tracked_sv.xyxy[i].astype(np.float32))
+
+        active_entries = [e for e in egress_state[cls] if (frame_idx - int(e["last_seen"])) <= hold_frames]
+        used = [False] * len(active_entries)
+        updated = []
+
+        for box in current_boxes:
+            best_i = -1
+            best_iou = 0.0
+            for i, entry in enumerate(active_entries):
+                if used[i]:
+                    continue
+                iou = _box_iou(box, np.asarray(entry["box"], dtype=np.float32))
+                if iou > best_iou:
+                    best_iou, best_i = iou, i
+
+            if best_i >= 0 and best_iou >= 0.15:
+                entry = active_entries[best_i]
+                entry["box"] = box.tolist()
+                entry["last_seen"] = frame_idx
+                used[best_i] = True
+                updated.append(entry)
+            else:
+                updated.append({
+                    "id": egress_state["next_id"],
+                    "box": box.tolist(),
+                    "last_seen": frame_idx,
+                })
+                egress_state["next_id"] += 1
+
+        for i, entry in enumerate(active_entries):
+            if not used[i]:
+                updated.append(entry)
+
+        egress_state[cls] = updated
+
+
+def _draw_persistent_egress_boxes(scene: np.ndarray, egress_state: dict) -> np.ndarray:
+    """Draw held egress boxes: door=blue, exit_sign=yellow."""
+    # BGR
+    styles = {
+        "door": (255, 0, 0),
+        "exit_sign": (0, 255, 255),
+    }
+
+    for cls, color in styles.items():
+        for entry in egress_state.get(cls, []):
+            x1, y1, x2, y2 = [int(v) for v in entry["box"]]
+            cv2.rectangle(scene, (x1, y1), (x2, y2), (0, 0, 0), 4)
+            cv2.rectangle(scene, (x1, y1), (x2, y2), color, 2)
+
+    return scene
+
+
+def _update_blue_door_obstruction_alerts(
+    tracked_sv: sv.Detections,
+    blue_doors: list[dict],
+    frame_idx: int,
+    fps: float,
+    door_block_timers: dict,
+    door_block_alerted: set[str],
+    door_block_events: list[str],
+) -> list[str]:
+    """Alert when any object obstructs a held blue door region for > threshold."""
+    if not DOOR_BLOCK_MONITOR_ENABLED:
+        door_block_timers.clear()
+        door_block_alerted.clear()
+        return []
+
+    if not blue_doors:
+        door_block_timers.clear()
+        door_block_alerted.clear()
+        return []
+
+    if tracked_sv is None or len(tracked_sv) == 0 or tracked_sv.tracker_id is None:
+        door_block_timers.clear()
+        door_block_alerted.clear()
+        return []
+
+    class_names = tracked_sv.data.get("class_name", np.array([]))
+    tracker_ids = tracked_sv.tracker_id
+    assets: list[tuple[str, int, np.ndarray]] = []
+    for i, tid in enumerate(tracker_ids):
+        if tid is None:
+            continue
+        cls = str(class_names[i])
+        if cls in DOOR_BLOCK_IGNORE_CLASSES:
+            continue
+        assets.append((cls, int(tid), tracked_sv.xyxy[i].astype(np.float32)))
+
+    active_pairs: set[str] = set()
+    active_lines: list[str] = []
+    for door in blue_doors:
+        rid = int(door["id"])
+        dbox = np.asarray(door["box"], dtype=np.float32)
+        door_area = max(1.0, float((dbox[2] - dbox[0]) * (dbox[3] - dbox[1])))
+
+        for obj_cls, obj_tid, obj_box in assets:
+            inter = _intersection_area(dbox, obj_box)
+            if inter <= 0.0 or (inter / door_area) < DOOR_BLOCK_MIN_OVERLAP_DOOR_FRAC:
+                continue
+
+            key = f"{obj_cls}_{obj_tid}->door_{rid}"
+            active_pairs.add(key)
+            if key not in door_block_timers:
+                door_block_timers[key] = {"first_frame": frame_idx}
+
+            blocked_sec = (frame_idx - int(door_block_timers[key]["first_frame"])) / max(fps, 1e-6)
+            if blocked_sec >= DOOR_BLOCK_THRESHOLD_SEC:
+                active_lines.append(f"ALERT: {obj_cls} blocks door #{rid} ({blocked_sec:.1f}s)")
+                if key not in door_block_alerted:
+                    print(f"[DOOR BLOCK ALERT] {key} obstructing blue door for {blocked_sec:.2f}s")
+                    door_block_events.append(f"DOOR_BLOCK:{key}:{blocked_sec:.2f}s@f{frame_idx}")
+                    door_block_alerted.add(key)
+
+    stale = [k for k in door_block_timers if k not in active_pairs]
+    for k in stale:
+        door_block_timers.pop(k, None)
+        door_block_alerted.discard(k)
+
+    return active_lines
+
+
 def annotate_image(
     bgr: np.ndarray,
     yolo_dets: dict,
     dino_dets: dict,
+    alert_lines: list[str] | None = None,
 ) -> np.ndarray:
     """
     Draw bounding boxes and labels on a copy of the frame.
@@ -850,14 +1239,19 @@ def annotate_image(
                     (255, 255, 255), txt_thick, cv2.LINE_AA
                 )
 
-    return scene
+    return _draw_alert_banner(scene, alert_lines or [])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Step 4a — Tracked annotation  (replaces annotate_image() in video mode)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _annotate_tracked(bgr: np.ndarray, tracked_sv: sv.Detections) -> np.ndarray:
+def _annotate_tracked(
+    bgr: np.ndarray,
+    tracked_sv: sv.Detections,
+    alert_lines: list[str] | None = None,
+    egress_state: dict | None = None,
+) -> np.ndarray:
     """
     Draw bounding boxes from ByteTrack-enriched sv.Detections.
 
@@ -871,14 +1265,17 @@ def _annotate_tracked(bgr: np.ndarray, tracked_sv: sv.Detections) -> np.ndarray:
     """
     scene = bgr.copy()
     if tracked_sv is None or len(tracked_sv) == 0:
-        return scene
+        if egress_state is not None:
+            scene = _draw_persistent_egress_boxes(scene, egress_state)
+        return _draw_alert_banner(scene, alert_lines or [])
 
     class_names = tracked_sv.data.get("class_name", np.array([]))
     sources     = tracked_sv.data.get("source",     np.array(["yolo"] * len(tracked_sv)))
     tracker_ids = tracked_sv.tracker_id   # None or int array
 
     yolo_mask = np.array([s == "yolo" for s in sources], dtype=bool)
-    dino_mask = ~yolo_mask
+    synthetic_mask = np.array([s == "synthetic" for s in sources], dtype=bool)
+    dino_mask = ~(yolo_mask | synthetic_mask)
 
     # ── YOLO tracked boxes (supervision palette) ───────────────────────────
     if yolo_mask.any():
@@ -936,7 +1333,17 @@ def _annotate_tracked(bgr: np.ndarray, tracked_sv: sv.Detections) -> np.ndarray:
                         cv2.FONT_HERSHEY_SIMPLEX, font_scale,
                         (255, 255, 255), 1, cv2.LINE_AA)
 
-    return scene
+    # ── Synthetic projected doors (blue, no labels/IDs) ───────────────────
+    if synthetic_mask.any():
+        synth_sv = tracked_sv[synthetic_mask]
+        for box in synth_sv.xyxy.astype(int):
+            x1, y1, x2, y2 = box
+            cv2.rectangle(scene, (x1, y1), (x2, y2), (0, 0, 0), 4)
+            cv2.rectangle(scene, (x1, y1), (x2, y2), (255, 0, 0), 2)
+
+    if egress_state is not None:
+        scene = _draw_persistent_egress_boxes(scene, egress_state)
+    return _draw_alert_banner(scene, alert_lines or [])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -963,6 +1370,267 @@ def _clip_box(box: np.ndarray, h: int, w: int) -> np.ndarray:
     clipped[2] = np.clip(clipped[2], 0, w - 1)
     clipped[3] = np.clip(clipped[3], 0, h - 1)
     return clipped
+
+
+def _resolve_exit_roi_polygon(frame_w: int, frame_h: int) -> np.ndarray | None:
+    """
+    Return exit ROI polygon as int32 pixel coordinates for this frame size.
+    Priority: EXIT_ROI_ABS (if provided) > EXIT_ROI_NORM.
+    """
+    if EXIT_ROI_ABS:
+        pts = np.asarray(EXIT_ROI_ABS, dtype=np.int32)
+    elif EXIT_ROI_NORM:
+        pts = np.asarray(
+            [
+                (int(np.clip(x, 0.0, 1.0) * frame_w), int(np.clip(y, 0.0, 1.0) * frame_h))
+                for x, y in EXIT_ROI_NORM
+            ],
+            dtype=np.int32,
+        )
+    else:
+        return None
+
+    if pts.shape[0] < 3:
+        return None
+    return pts
+
+
+def _box_intersects_polygon(box: np.ndarray, polygon: np.ndarray) -> bool:
+    """
+    Fast intersection check between an xyxy box and ROI polygon.
+    """
+    x1, y1, x2, y2 = [float(v) for v in box]
+    if x2 <= x1 or y2 <= y1:
+        return False
+
+    corners = np.asarray(
+        [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
+        dtype=np.float32,
+    )
+    cx, cy = float((x1 + x2) * 0.5), float((y1 + y2) * 0.5)
+
+    # Any box corner/center inside polygon.
+    for px, py in np.vstack([corners, [[cx, cy]]]):
+        if cv2.pointPolygonTest(polygon.astype(np.float32), (px, py), False) >= 0:
+            return True
+
+    # Any polygon vertex inside box.
+    for px, py in polygon:
+        if x1 <= px <= x2 and y1 <= py <= y2:
+            return True
+
+    return False
+
+
+def _box_iou(box_a: np.ndarray, box_b: np.ndarray) -> float:
+    ax1, ay1, ax2, ay2 = [float(v) for v in box_a]
+    bx1, by1, bx2, by2 = [float(v) for v in box_b]
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+    inter = (ix2 - ix1) * (iy2 - iy1)
+    area_a = max(1.0, (ax2 - ax1) * (ay2 - ay1))
+    area_b = max(1.0, (bx2 - bx1) * (by2 - by1))
+    return float(inter / (area_a + area_b - inter))
+
+
+def _intersection_area(box_a: np.ndarray, box_b: np.ndarray) -> float:
+    ax1, ay1, ax2, ay2 = [float(v) for v in box_a]
+    bx1, by1, bx2, by2 = [float(v) for v in box_b]
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+    return float((ix2 - ix1) * (iy2 - iy1))
+
+
+def _update_door_block_alerts(
+    tracked_sv: sv.Detections,
+    frame_idx: int,
+    fps: float,
+    door_block_timers: dict,
+    door_block_alerted: set[str],
+    door_block_events: list[str],
+) -> None:
+    """
+    Temporal monitor for obstructions inside each detected door region.
+
+    Maintains timers keyed by "objClass_objTid->door_doorTid" and triggers
+    a warning when overlap persists beyond DOOR_BLOCK_THRESHOLD_SEC.
+    """
+    if tracked_sv is None or len(tracked_sv) == 0 or tracked_sv.tracker_id is None:
+        door_block_timers.clear()
+        door_block_alerted.clear()
+        return
+
+    class_names = tracked_sv.data.get("class_name", np.array([]))
+    tracker_ids = tracked_sv.tracker_id
+
+    doors: list[tuple[int, np.ndarray]] = []
+    assets: list[tuple[str, int, np.ndarray]] = []
+    for i, tid in enumerate(tracker_ids):
+        if tid is None:
+            continue
+        cls = str(class_names[i])
+        box = tracked_sv.xyxy[i].astype(np.float32)
+        if cls == "door":
+            doors.append((int(tid), box))
+        elif cls not in DOOR_BLOCK_IGNORE_CLASSES:
+            assets.append((cls, int(tid), box))
+
+    if not doors or not assets:
+        door_block_timers.clear()
+        door_block_alerted.clear()
+        return
+
+    active_pairs: set[str] = set()
+    for door_tid, door_box in doors:
+        door_area = max(1.0, float((door_box[2] - door_box[0]) * (door_box[3] - door_box[1])))
+        for obj_cls, obj_tid, obj_box in assets:
+            inter = _intersection_area(door_box, obj_box)
+            if inter <= 0.0:
+                continue
+            if (inter / door_area) < DOOR_BLOCK_MIN_OVERLAP_DOOR_FRAC:
+                continue
+
+            pair_key = f"{obj_cls}_{obj_tid}->door_{door_tid}"
+            active_pairs.add(pair_key)
+            if pair_key not in door_block_timers:
+                door_block_timers[pair_key] = {
+                    "first_frame": frame_idx,
+                    "first_sec": frame_idx / max(fps, 1e-6),
+                }
+
+            blocked_sec = (frame_idx - int(door_block_timers[pair_key]["first_frame"])) / max(fps, 1e-6)
+            if blocked_sec >= DOOR_BLOCK_THRESHOLD_SEC and pair_key not in door_block_alerted:
+                msg = (
+                    f"[DOOR BLOCK ALERT] {pair_key} obstructing door for {blocked_sec:.2f}s "
+                    f"(threshold={DOOR_BLOCK_THRESHOLD_SEC:.2f}s, frame={frame_idx})"
+                )
+                print(msg)
+                door_block_events.append(f"DOOR_BLOCK:{pair_key}:{blocked_sec:.2f}s@f{frame_idx}")
+                door_block_alerted.add(pair_key)
+
+    stale = [k for k in door_block_timers if k not in active_pairs]
+    for k in stale:
+        door_block_timers.pop(k, None)
+        door_block_alerted.discard(k)
+
+
+def _is_exit_sign_above_door(door_box: np.ndarray, sign_box: np.ndarray) -> bool:
+    """
+    Geometric heuristic: exit sign center must be horizontally aligned with the
+    door and vertically around/above the top edge of the door.
+    """
+    dx1, dy1, dx2, dy2 = [float(v) for v in door_box]
+    sx1, sy1, sx2, sy2 = [float(v) for v in sign_box]
+    if dx2 <= dx1 or dy2 <= dy1 or sx2 <= sx1 or sy2 <= sy1:
+        return False
+
+    dw = dx2 - dx1
+    dh = dy2 - dy1
+    scx = (sx1 + sx2) * 0.5
+    scy = (sy1 + sy2) * 0.5
+    s_bottom = sy2
+
+    x_ok = (dx1 - DOOR_SIGN_X_MARGIN_FRAC * dw) <= scx <= (dx2 + DOOR_SIGN_X_MARGIN_FRAC * dw)
+    y_ok = (dy1 - DOOR_SIGN_MAX_ABOVE_FRAC * dh) <= s_bottom <= (dy1 + DOOR_SIGN_TOP_BAND_FRAC * dh)
+    center_ok = scy <= (dy1 + DOOR_SIGN_TOP_BAND_FRAC * dh)
+    return x_ok and y_ok and center_ok
+
+
+def _door_sign_alignment_counts(door_boxes: list[np.ndarray], sign_boxes: list[np.ndarray]) -> tuple[int, int]:
+    """
+    Returns (doors_with_sign_on_top, total_doors).
+    """
+    if not door_boxes:
+        return 0, 0
+    matched = 0
+    for door in door_boxes:
+        if any(_is_exit_sign_above_door(door, sign) for sign in sign_boxes):
+            matched += 1
+    return matched, len(door_boxes)
+
+
+def _extract_class_boxes_from_tracked(tracked_sv: sv.Detections, class_name: str) -> list[np.ndarray]:
+    if tracked_sv is None or len(tracked_sv) == 0:
+        return []
+    class_names = tracked_sv.data.get("class_name", np.array([]))
+    boxes: list[np.ndarray] = []
+    for i, cls in enumerate(class_names):
+        if str(cls) == class_name:
+            boxes.append(tracked_sv.xyxy[i].astype(np.float32))
+    return boxes
+
+
+def _extract_class_boxes_from_dict(dets_dict: dict, class_name: str) -> list[np.ndarray]:
+    return [np.asarray(d[:4], dtype=np.float32) for d in dets_dict.get(class_name, [])]
+
+
+def _update_exit_block_alerts(
+    tracked_sv: sv.Detections,
+    frame_idx: int,
+    fps: float,
+    exit_roi_polygon: np.ndarray | None,
+    exit_block_timers: dict,
+    exit_block_alerted: set[str],
+    exit_alert_events: list[str],
+) -> None:
+    """
+    Maintain per-track dwell timers in the exit ROI and emit threshold alerts.
+
+    exit_block_timers maps "class_tid" -> {"first_frame": int, "first_sec": float}.
+    """
+    if exit_roi_polygon is None or tracked_sv is None or len(tracked_sv) == 0:
+        # No tracks this frame: clear timers so next entry starts fresh.
+        exit_block_timers.clear()
+        exit_block_alerted.clear()
+        return
+
+    class_names = tracked_sv.data.get("class_name", np.array([]))
+    tracker_ids = tracked_sv.tracker_id
+    if tracker_ids is None:
+        return
+
+    active_keys: set[str] = set()
+    for i, tid in enumerate(tracker_ids):
+        if tid is None:
+            continue
+        cls = str(class_names[i])
+        if cls in EXIT_BLOCK_IGNORE_CLASSES:
+            continue
+
+        box = tracked_sv.xyxy[i]
+        if not _box_intersects_polygon(box, exit_roi_polygon):
+            continue
+
+        key = f"{cls}_{int(tid)}"
+        active_keys.add(key)
+        if key not in exit_block_timers:
+            exit_block_timers[key] = {
+                "first_frame": frame_idx,
+                "first_sec": frame_idx / max(fps, 1e-6),
+            }
+
+        entered = exit_block_timers[key]
+        blocked_sec = (frame_idx - int(entered["first_frame"])) / max(fps, 1e-6)
+        if blocked_sec >= EXIT_BLOCK_THRESHOLD_SEC and key not in exit_block_alerted:
+            msg = (
+                f"[EXIT ALERT] {key} blocking exit ROI for {blocked_sec:.2f}s "
+                f"(threshold={EXIT_BLOCK_THRESHOLD_SEC:.2f}s, frame={frame_idx})"
+            )
+            print(msg)
+            exit_alert_events.append(
+                f"EXIT_BLOCK:{key}:{blocked_sec:.2f}s@f{frame_idx}"
+            )
+            exit_block_alerted.add(key)
+
+    # Reset dwell state for tracks that left the ROI or disappeared.
+    stale = [k for k in exit_block_timers if k not in active_keys]
+    for k in stale:
+        exit_block_timers.pop(k, None)
+        exit_block_alerted.discard(k)
 
 
 def _associate_worker_track(ppe_box: np.ndarray, workers: dict) -> tuple[str, np.ndarray] | tuple[None, None]:
@@ -1414,10 +2082,12 @@ def classify_result(target: str, flat_dets: dict):
 # Video inference
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_video(v1: YOLO, v3: YOLO, video_path: Path, out_path: Path) -> dict:
+def run_video(v1: YOLO, v3: YOLO, video_path: Path, out_path: Path) -> tuple[dict, str]:
     """
     Process a video file frame-by-frame.
-    Returns a flat summary: {class_name: [conf, ...]} across all frames.
+        Returns:
+            - flat summary {class_name: [conf, ...]} across all frames
+            - alert note string to append into Excel log notes
 
     Strategy:
       - YOLO ensemble runs on every frame.
@@ -1463,11 +2133,32 @@ def run_video(v1: YOLO, v3: YOLO, video_path: Path, out_path: Path) -> dict:
     room_state: dict[str, dict] = {}                 # keyed by "{class_name}_{tracker_id}"
     id_remap:   dict[str, dict] = {}                 # per-class stable ID remapping state
     motion_state: dict = {}                          # worker-anchored PPE motion stabilizer state
+    exit_block_timers: dict[str, dict] = {}          # "class_tid" -> first entry frame/sec
+    exit_block_alerted: set[str] = set()             # keys already alerted in current occupancy
+    exit_alert_events: list[str] = []                # one event string per threshold crossing
+    door_block_timers: dict[str, dict] = {}          # "obj_tid->door_tid" dwell start state
+    door_block_alerted: set[str] = set()             # obstruction pairs already alerted
+    door_block_events: list[str] = []                # one event per threshold crossing
+    egress_state: dict = {"next_id": 1, "door": [], "exit_sign": []}
+    door_frames_seen = 0
+    door_frames_signed = 0
+    door_instances_seen = 0
+    door_instances_signed = 0
+    current_alert_lines: list[str] = []
     last_tracked_sv: sv.Detections | None = None     # carry-forward detections on glare frames
     frame_idx = 0
     dino_frame_interval = max(1, int(DINO_VIDEO_INTERVAL_FRAMES))
+    yolo_sahi_frame_interval = max(1, int(YOLO_VIDEO_SAHI_INTERVAL_FRAMES))
+    egress_hold_frames = max(1, int(round(fps * EGRESS_BOX_HOLD_SEC)))
+    exit_roi_polygon = _resolve_exit_roi_polygon(width, height)
     print(f"  Video: {width}x{height} @ {fps:.1f} fps  ({total} frames)")
     print(f"  DINO fires every {dino_frame_interval} frames (~{dino_frame_interval / max(fps, 1e-6):.2f}s) for missed weak classes.")
+    print(f"  YOLO SAHI fires every {yolo_sahi_frame_interval} frames for {sorted(YOLO_SAHI_CLASSES)}.")
+    if exit_roi_polygon is None:
+        print("  [EXIT] disabled (ROI polygon not configured)")
+    else:
+        roi_txt = ", ".join(f"({int(x)},{int(y)})" for x, y in exit_roi_polygon)
+        print(f"  [EXIT] enabled: threshold={EXIT_BLOCK_THRESHOLD_SEC:.1f}s ROI={roi_txt}")
 
     while True:
         ret, bgr = cap.read()
@@ -1491,28 +2182,55 @@ def run_video(v1: YOLO, v3: YOLO, video_path: Path, out_path: Path) -> dict:
             tracked_sv = last_tracked_sv
         else:
             # Normal frame: run YOLO + DINO
-            # Layer 1: YOLO on a temp file (ultralytics needs a path or numpy array)
+            # Layer 1: YOLO on full frame
             yolo_dets = _yolo_on_frame(v1, v3, bgr)
+            if (frame_idx - 1) % yolo_sahi_frame_interval == 0:
+                sahi_dets = _yolo_sahi_on_frame(v1, v3, bgr)
+                for cls, dets in sahi_dets.items():
+                    if cls in yolo_dets:
+                        yolo_dets[cls] = _nms_merge(yolo_dets[cls] + dets, IOU)
+                    else:
+                        yolo_dets[cls] = dets
             yolo_dets = _promote_worker_aliases(yolo_dets)
 
             # Layer 2: DINO every N frames. We intentionally do not carry
             # boxes forward here, because stale DINO boxes freeze in place
             # while the object or camera is still moving.
             active_dino: dict = {}
+            synthetic_classes: set[str] = set()
             if (frame_idx - 1) % dino_frame_interval == 0:
                 detected_cls = set(yolo_dets.keys())
-                all_dino_targets = set(DINO_FALLBACK) | set(DINO_SAHI)
+                all_dino_targets = set(DINO_FALLBACK) | set(DINO_SAHI) | DINO_FORCE_CLASSES
                 missing_weak = [c for c in all_dino_targets if c not in detected_cls]
+                for cls in DINO_FORCE_CLASSES:
+                    if cls not in missing_weak:
+                        missing_weak.append(cls)
                 if missing_weak:
                     pil_img     = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-                    active_dino = dino_infer(pil_img, missing_weak)
+                    active_dino = dino_infer(pil_img, missing_weak, yolo_dets)
+
+            # If door is missed but exit_sign exists, synthesize door ROI from sign.
+            # Prefer storing in DINO branch so it is drawn and tracked as fallback.
+            if "door" not in yolo_dets and "door" not in active_dino:
+                sign_union = list(yolo_dets.get("exit_sign", [])) + list(active_dino.get("exit_sign", []))
+                if sign_union:
+                    synth_src = {"exit_sign": sign_union}
+                    synth_added = _inject_synthetic_door(synth_src, width, height)
+                    if synth_added:
+                        active_dino["door"] = synth_src["door"]
+                        synthetic_classes.add("door")
+                        print("  [SYNTH] door <- exit_sign projected to floor")
 
             all_dets = {**active_dino, **yolo_dets}
 
             # Step 2: merge into unified sv.Detections for the tracker
             # Pass active_dino keys so each detection is tagged "yolo" or "dino"
             # in det.data["source"] — preserved through tracking for correct colouring.
-            combined_sv = _dets_to_sv(all_dets, dino_classes=set(active_dino.keys()))
+            combined_sv = _dets_to_sv(
+                all_dets,
+                dino_classes=set(active_dino.keys()),
+                synthetic_classes=synthetic_classes,
+            )
 
             # Step 3: feed combined detections through ByteTrack
             # update_with_detections() returns sv.Detections enriched with tracker_id.
@@ -1553,13 +2271,82 @@ def run_video(v1: YOLO, v3: YOLO, video_path: Path, out_path: Path) -> dict:
         # "{class_name}_{tracker_id}" — enables flicker-free PPE alert logic.
         # _annotate_tracked() draws labelled boxes; DINO boxes remain orange.
         _update_room_state(room_state, tracked_sv, frame_idx)
-        annotated = _annotate_tracked(bgr, tracked_sv)
+        _update_exit_block_alerts(
+            tracked_sv,
+            frame_idx,
+            fps,
+            exit_roi_polygon,
+            exit_block_timers,
+            exit_block_alerted,
+            exit_alert_events,
+        )
+        _update_persistent_egress_state(egress_state, tracked_sv, frame_idx, egress_hold_frames)
+        blue_door_alerts = _update_blue_door_obstruction_alerts(
+            tracked_sv,
+            egress_state.get("door", []),
+            frame_idx,
+            fps,
+            door_block_timers,
+            door_block_alerted,
+            door_block_events,
+        )
+
+        door_boxes = [np.asarray(e["box"], dtype=np.float32) for e in egress_state.get("door", [])]
+        sign_boxes = [np.asarray(e["box"], dtype=np.float32) for e in egress_state.get("exit_sign", [])]
+        signed_cnt, total_cnt = _door_sign_alignment_counts(door_boxes, sign_boxes)
+        candidate_boxes = [
+            tracked_sv.xyxy[i].astype(np.float32)
+            for i, cls in enumerate(tracked_sv.data.get("class_name", np.array([])))
+            if str(cls) not in DOOR_BLOCK_IGNORE_CLASSES and str(cls) != "door"
+        ] if tracked_sv is not None and len(tracked_sv) > 0 else []
+        blocked_cnt, blocked_total = _door_block_counts_from_boxes(door_boxes, candidate_boxes)
+        current_alert_lines = []
+        if blocked_total > 0 and blocked_cnt > 0:
+            current_alert_lines.append(f"DOOR BLOCKED: {blocked_cnt}/{blocked_total} door(s) obstructed")
+        if total_cnt > 0 and signed_cnt < total_cnt:
+            current_alert_lines.append(f"EXIT SIGN MISSING: {total_cnt - signed_cnt}/{total_cnt} door(s) unsignaled")
+        current_alert_lines.extend(blue_door_alerts)
+        if total_cnt > 0:
+            door_frames_seen += 1
+            door_instances_seen += total_cnt
+            door_instances_signed += signed_cnt
+            if signed_cnt > 0:
+                door_frames_signed += 1
+            missing_cnt = total_cnt - signed_cnt
+            if missing_cnt > 0 and frame_idx % 60 == 0:
+                print(f"  [EGRESS] frame {frame_idx}: {missing_cnt}/{total_cnt} door(s) without exit sign on top")
+
+        annotated = _annotate_tracked(bgr, tracked_sv, current_alert_lines, egress_state)
         writer.write(annotated)
 
     cap.release()
     writer.release()
     print(f"  Processed {frame_idx} frames.")
-    return dict(all_confs)
+    if exit_alert_events:
+        # Keep the note compact for Excel cell readability.
+        events_txt = "; ".join(exit_alert_events[:6])
+        if len(exit_alert_events) > 6:
+            events_txt += f"; ... (+{len(exit_alert_events) - 6} more)"
+        exit_note = f"[EXIT_MONITOR threshold={EXIT_BLOCK_THRESHOLD_SEC:.1f}s] {events_txt}"
+    else:
+        exit_note = f"[EXIT_MONITOR threshold={EXIT_BLOCK_THRESHOLD_SEC:.1f}s] no prolonged blocking"
+    if door_frames_seen > 0:
+        door_note = (
+            f"[DOOR_EXIT_SIGN frames={door_frames_signed}/{door_frames_seen} "
+            f"doors={door_instances_signed}/{door_instances_seen}]"
+        )
+    else:
+        door_note = "[DOOR_EXIT_SIGN no door detected]"
+
+    if door_block_events:
+        events_txt = "; ".join(door_block_events[:6])
+        if len(door_block_events) > 6:
+            events_txt += f"; ... (+{len(door_block_events) - 6} more)"
+        door_block_note = f"[DOOR_BLOCK threshold={DOOR_BLOCK_THRESHOLD_SEC:.1f}s] {events_txt}"
+    else:
+        door_block_note = f"[DOOR_BLOCK threshold={DOOR_BLOCK_THRESHOLD_SEC:.1f}s] no prolonged obstruction"
+
+    return dict(all_confs), f"{exit_note} | {door_note} | {door_block_note}"
 
 
 def _yolo_on_frame(v1: YOLO, v3: YOLO, bgr: np.ndarray) -> dict:
@@ -1668,15 +2455,31 @@ def run_image(v1: YOLO, v3: YOLO, media_path: Path,
             print(f"  [CTX] suppressed bottle — surgical scene ({sorted(suppressor_found)})")
 
     # ── Layer 2: DINO for missing weak classes ─────────────────────────────
-    all_dino_targets = set(DINO_FALLBACK) | set(DINO_SAHI)
+    all_dino_targets = set(DINO_FALLBACK) | set(DINO_SAHI) | DINO_FORCE_CLASSES
     missing_weak = [c for c in all_dino_targets if c not in yolo_dets]
+    for cls in DINO_FORCE_CLASSES:
+        if cls not in missing_weak:
+            missing_weak.append(cls)
     missing_weak = _context_gate(missing_weak, yolo_dets)
     dino_dets: dict = {}
+    synthetic_classes: set[str] = set()
     if missing_weak:
         pil_img = Image.open(media_path).convert("RGB")
-        dino_dets = dino_infer(pil_img, missing_weak)
+        dino_dets = dino_infer(pil_img, missing_weak, yolo_dets)
         if dino_dets:
             print(f"  [DINO] filled in: {sorted(dino_dets.keys())}")
+
+    # Synthetic fallback for image mode: project door from exit_sign when needed.
+    img_w, img_h = Image.open(media_path).size
+    if "door" not in yolo_dets and "door" not in dino_dets:
+        sign_union = list(yolo_dets.get("exit_sign", [])) + list(dino_dets.get("exit_sign", []))
+        if sign_union:
+            synth_src = {"exit_sign": sign_union}
+            synth_added = _inject_synthetic_door(synth_src, img_w, img_h)
+            if synth_added:
+                dino_dets["door"] = synth_src["door"]
+                synthetic_classes.add("door")
+                print("  [SYNTH] door <- exit_sign projected to floor")
 
     # ── Layer 2b: hair_net proximity filter ───────────────────────────────
     # Keep only hair_net detections whose centre falls STRICTLY INSIDE a
@@ -1707,6 +2510,30 @@ def run_image(v1: YOLO, v3: YOLO, media_path: Path,
     all_dets  = {**yolo_dets, **dino_dets}
     flat_dets = {cls: [d[4] for d in dets] for cls, dets in all_dets.items()}
 
+    door_boxes_img = _extract_class_boxes_from_dict(all_dets, "door")
+    sign_boxes_img = _extract_class_boxes_from_dict(all_dets, "exit_sign")
+    signed_img, total_img = _door_sign_alignment_counts(door_boxes_img, sign_boxes_img)
+    blocked_img = 0
+    if door_boxes_img:
+        for door_box in door_boxes_img:
+            door_area = max(1.0, float((door_box[2] - door_box[0]) * (door_box[3] - door_box[1])))
+            is_blocked = False
+            for cls, dets in all_dets.items():
+                if cls in DOOR_BLOCK_IGNORE_CLASSES:
+                    continue
+                for d in dets:
+                    obj_box = np.asarray(d[:4], dtype=np.float32)
+                    if (_intersection_area(door_box, obj_box) / door_area) >= DOOR_BLOCK_MIN_OVERLAP_DOOR_FRAC:
+                        is_blocked = True
+                        break
+                if is_blocked:
+                    break
+            if is_blocked:
+                blocked_img += 1
+    if total_img > 0:
+        print(f"  [EGRESS] door(s) with exit sign on top: {signed_img}/{total_img}")
+        print(f"  [DOOR BLOCK] blocked door(s): {blocked_img}/{total_img}")
+
     print(f"  Detections ({len(all_dets)} classes):")
     for cls in sorted(all_dets):
         confs = [round(d[4], 3) for d in all_dets[cls]]
@@ -1717,7 +2544,21 @@ def run_image(v1: YOLO, v3: YOLO, media_path: Path,
     ts        = datetime.now().strftime("%Y%m%d_%H%M%S")
     stem      = media_path.stem[:35] or "media"
     bgr       = cv2.imread(str(media_path))
-    annotated = annotate_image(bgr, yolo_dets, dino_dets)
+    image_alert_lines: list[str] = []
+    if blocked_img > 0 and total_img > 0:
+        image_alert_lines.append(f"DOOR BLOCKED: {blocked_img}/{total_img} door(s) obstructed")
+    if total_img > 0 and signed_img < total_img:
+        image_alert_lines.append(f"EXIT SIGN MISSING: {total_img - signed_img}/{total_img} door(s) unsignaled")
+
+    image_sv = _dets_to_sv(
+        all_dets,
+        dino_classes=set(dino_dets.keys()),
+        synthetic_classes=synthetic_classes,
+    )
+    if image_sv is not None and len(image_sv) > 0:
+        # Use deterministic IDs in image mode so labels render consistently.
+        image_sv.tracker_id = np.arange(1, len(image_sv) + 1, dtype=int)
+    annotated = _annotate_tracked(bgr, image_sv, image_alert_lines)
     out_path  = OUT_DIR / f"{stem}_{OUTPUT_RUN_TAG}_{ts}.jpg"
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(out_path), annotated)
@@ -1730,6 +2571,11 @@ def run_image(v1: YOLO, v3: YOLO, media_path: Path,
         matched_key = next((k for k in all_dets if k.lower() == t_lower), None)
         if matched_key:
             extra = _source_tag(matched_key, dino_dets)
+    if total_img > 0:
+        door_note_img = f"[DOOR_EXIT_SIGN {signed_img}/{total_img}]"
+        extra = " | ".join(filter(None, [extra, door_note_img]))
+        block_note_img = f"[DOOR_BLOCK now={blocked_img}/{total_img}]"
+        extra = " | ".join(filter(None, [extra, block_note_img]))
     result_type = log_entry(url or str(media_path), target, flat_dets, extra)
     print(f"  Result: {result_type}")
 
@@ -1785,7 +2631,7 @@ def main():
             if _is_video(str(media_path)):
                 print(f"  Mode: VIDEO  (DINO every {DINO_VIDEO_INTERVAL_SEC}s)")
                 out_path  = OUT_DIR / f"{stem}_{OUTPUT_RUN_TAG}_{ts}.mp4"
-                all_confs = run_video(v1, v3, media_path, out_path)
+                all_confs, exit_note = run_video(v1, v3, media_path, out_path)
                 print(f"  Saved : {out_path.name}")
 
                 flat_dets = {
@@ -1797,7 +2643,7 @@ def main():
                           f"detections={len(all_confs[cls])}")
 
                 _, conf_str, result_type, _ = classify_result(target, flat_dets)
-                log_entry(url, target, flat_dets, f"[VIDEO {stem}]")
+                log_entry(url, target, flat_dets, f"[VIDEO {stem}] | {exit_note}")
                 print(f"  Result: {result_type}  |  conf: {conf_str}")
 
             else:
