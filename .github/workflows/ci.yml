@@ -23,10 +23,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          files=$(git ls-files '*.py')
-          if [ -z "$files" ]; then
+          mapfile -t files < <(git ls-files '*.py')
+          if [ ${#files[@]} -eq 0 ]; then
             echo "No Python files tracked; skipping."
             exit 0
           fi
-          python -m py_compile $files
+          python -m py_compile "${files[@]}"
           echo "Syntax check passed for tracked Python files."
