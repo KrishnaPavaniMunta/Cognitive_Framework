@@ -6,6 +6,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.venv-gpu*/
 venv/
 env/
 
@@ -33,6 +34,8 @@ Thumbs.db
 *.onnx
 *.engine
 *.ckpt
+# SAM ViT weights are too large for GitHub (>2 GB) — download separately
+*.pth
 
 # Datasets and generated assets
 _archive/
