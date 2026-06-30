@@ -66,13 +66,14 @@ DINO_INTERVAL = det.DINO_INTERVAL
 HOLD_FRAMES   = det.HOLD_FRAMES
 
 # ── Zone drawing colours (BGR) ────────────────────────────────────────────────
-ZONE_FILL_COLOR = (0, 165, 255)   # orange floor disc
-ZONE_WALL_COLOR = (0, 140, 255)   # orange curved wall
-ZONE_EDGE_COLOR = (0, 255, 255)   # yellow outline
-DOOR_POLY_COLOR = (255, 80, 0)    # door mask
-TXT_COLOR       = (255, 255, 255)
+ZONE_FACE_COLOR   = (60,  60, 220)    # light red fill (BGR)
+ZONE_SHADE_COLOR  = (30,  30, 160)    # darker red for shaded curved wall
+ZONE_EDGE_COLOR   = (0,   0, 255)     # bright red edges
+ZONE_FILL_ALPHA   = 0.35              # translucency of faces
+DOOR_POLY_COLOR   = (0, 200, 255)     # door mask outline (yellow)
+TXT_COLOR         = (255, 255, 255)
 
-ARC_SAMPLES = 28   # number of samples along the semicircle arc
+ARC_SAMPLES = 32   # number of samples along the semicircle arc (higher = smoother)
 
 
 # ── 3D geometry helpers ───────────────────────────────────────────────────────
@@ -124,71 +125,124 @@ def _project(x: float, y: float, z: float, intr) -> tuple[int, int] | None:
     return int(round(u)), int(round(v))
 
 
-def _half_cylinder_arcs(
+def _half_cylinder_points(
     door_xyz: tuple[float, float, float],
     radius: float,
     door_bottom_y: float,
     door_top_y: float,
     intr,
-) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+) -> tuple[list, list]:
     """
-    Sample the half-cylinder boundary and project to pixels.
+    Sample the half-cylinder in 3D and project all points to pixels.
 
-    The semicircle sits at door_bottom_y, centred at the door's (X, Z) footprint,
-    flat edge across the door (along X), bulging toward the camera (−Z).
-    Extrudes upward to door_top_y.
-    Returns (bottom_arc_px, top_arc_px), each a list of projected points.
+    Returns (bottom_pts, top_pts) — two parallel arcs in pixel space,
+    ordered left-to-right (theta 0→π).  Each entry is (px, py) or None.
     """
     x_door, _, z_door = door_xyz
-    bottom_arc: list[tuple[int, int]] = []
-    top_arc: list[tuple[int, int]] = []
+    bottom_pts = []
+    top_pts = []
 
     for i in range(ARC_SAMPLES + 1):
         theta = np.pi * i / ARC_SAMPLES         # 0 → π
-        x = x_door + radius * np.cos(theta)     # flat edge along door width
-        z = z_door - radius * np.sin(theta)     # bulge toward camera
+        x = x_door + radius * np.cos(theta)     # left → right along door
+        z = z_door - radius * np.sin(theta)     # bulge toward camera (−Z)
 
-        p_bottom = _project(x, door_bottom_y, z, intr)
-        p_top = _project(x, door_top_y, z, intr)
-        if p_bottom is not None:
-            bottom_arc.append(p_bottom)
-        if p_top is not None:
-            top_arc.append(p_top)
+        bottom_pts.append(_project(x, door_bottom_y, z, intr))
+        top_pts.append(_project(x, door_top_y, z, intr))
 
-    return bottom_arc, top_arc
+    return bottom_pts, top_pts
 
 
 def _draw_zone(
     frame: np.ndarray,
-    bottom_arc: list[tuple[int, int]],
-    top_arc: list[tuple[int, int]],
+    door_xyz: tuple[float, float, float],
+    radius: float,
+    door_bottom_y: float,
+    door_top_y: float,
+    intr,
 ) -> np.ndarray:
-    """Render the translucent half-cylinder keep-clear zone."""
-    if len(bottom_arc) < 3:
+    """
+    Render a 3D-looking translucent half-cylinder keep-clear zone.
+
+    Faces drawn (back-to-front for correct painter's order):
+      1. Curved wall strip-quads  (shaded by angle — darker toward sides)
+      2. Top disc cap             (lighter fill)
+      3. Bottom disc cap          (slightly darker, floor-facing)
+      4. Flat back wall           (two vertical edges of the opening)
+      5. All edges in bright red
+    """
+    bottom_pts, top_pts = _half_cylinder_points(
+        door_xyz, radius, door_bottom_y, door_top_y, intr
+    )
+
+    # Filter paired points where both top & bottom projected successfully.
+    valid = [
+        (b, t) for b, t in zip(bottom_pts, top_pts)
+        if b is not None and t is not None
+    ]
+    if len(valid) < 3:
         return frame
+
+    bot_ok = [p[0] for p in valid]
+    top_ok = [p[1] for p in valid]
+    n = len(valid)
 
     overlay = frame.copy()
 
-    # Filled bottom semicircle.
-    bottom_poly = np.array(bottom_arc, dtype=np.int32)
-    cv2.fillPoly(overlay, [bottom_poly], ZONE_FILL_COLOR)
+    # ── 1. Curved wall: strip quads, each quad between sample i and i+1 ────
+    for i in range(n - 1):
+        quad = np.array([
+            bot_ok[i], bot_ok[i + 1],
+            top_ok[i + 1], top_ok[i],
+        ], dtype=np.int32)
 
-    
-    # Curved vertical wall (bottom arc → reversed top arc).
-    if len(top_arc) >= 3:
-        n = min(len(bottom_arc), len(top_arc))
-        # Ensure a clean bounding loop: walk forward along bottom, then backward along top
-        wall_points = list(bottom_arc[:n]) + list(reversed(top_arc[:n]))
-        wall = np.array(wall_points, dtype=np.int32)
-        cv2.fillPoly(overlay, [wall], ZONE_WALL_COLOR)
+        # Shade by angle: mid-point angle gives lighting cue (0 = left/right edge, π/2 = front-centre)
+        theta_mid = np.pi * (i + 0.5) / ARC_SAMPLES
+        # sin(theta) → 1.0 at centre, 0.0 at edges.  Brighten centre, darken edges.
+        t_shade = np.sin(theta_mid)               # 0..1
+        r = int(ZONE_SHADE_COLOR[2] + t_shade * (ZONE_FACE_COLOR[2] - ZONE_SHADE_COLOR[2]))
+        g = int(ZONE_SHADE_COLOR[1] + t_shade * (ZONE_FACE_COLOR[1] - ZONE_SHADE_COLOR[1]))
+        b = int(ZONE_SHADE_COLOR[0] + t_shade * (ZONE_FACE_COLOR[0] - ZONE_SHADE_COLOR[0]))
+        cv2.fillPoly(overlay, [quad], (b, g, r))
 
-    cv2.addWeighted(overlay, 0.30, frame, 0.70, 0, frame)
+    # ── 2. Top cap disc ─────────────────────────────────────────────────────
+    top_cap = np.array(top_ok, dtype=np.int32)
+    cap_color = tuple(min(255, int(c * 1.15)) for c in ZONE_FACE_COLOR)  # slightly lighter
+    cv2.fillPoly(overlay, [top_cap], cap_color)
 
-    # Outlines.
-    cv2.polylines(frame, [bottom_poly], isClosed=True, color=ZONE_EDGE_COLOR, thickness=2)
-    if len(top_arc) >= 2:
-        cv2.polylines(frame, [np.array(top_arc, dtype=np.int32)], isClosed=False,
-                      color=ZONE_EDGE_COLOR, thickness=1)
+    # ── 3. Bottom cap disc ──────────────────────────────────────────────────
+    bot_cap = np.array(bot_ok, dtype=np.int32)
+    floor_color = tuple(max(0, int(c * 0.75)) for c in ZONE_FACE_COLOR)  # slightly darker
+    cv2.fillPoly(overlay, [bot_cap], floor_color)
+
+    # ── 4. Flat back wall (the open rectangle at the door face) ─────────────
+    if top_ok and bot_ok:
+        back_wall = np.array([
+            bot_ok[0], bot_ok[-1],
+            top_ok[-1], top_ok[0],
+        ], dtype=np.int32)
+        back_color = tuple(max(0, int(c * 0.55)) for c in ZONE_FACE_COLOR)  # darkest face
+        cv2.fillPoly(overlay, [back_wall], back_color)
+
+    # Blend translucent fill.
+    cv2.addWeighted(overlay, ZONE_FILL_ALPHA, frame, 1.0 - ZONE_FILL_ALPHA, 0, frame)
+
+    # ── 5. Edges in bright red ───────────────────────────────────────────────
+    edge_t = 2
+    # Bottom arc
+    cv2.polylines(frame, [np.array(bot_ok, dtype=np.int32)], isClosed=False,
+                  color=ZONE_EDGE_COLOR, thickness=edge_t)
+    # Top arc
+    cv2.polylines(frame, [np.array(top_ok, dtype=np.int32)], isClosed=False,
+                  color=ZONE_EDGE_COLOR, thickness=edge_t)
+    # Left vertical edge
+    if bot_ok and top_ok:
+        cv2.line(frame, bot_ok[0],  top_ok[0],  ZONE_EDGE_COLOR, edge_t)
+        cv2.line(frame, bot_ok[-1], top_ok[-1], ZONE_EDGE_COLOR, edge_t)
+    # Vertical stripes along curved wall every ~4 samples for 3D grid cue
+    for i in range(0, n, max(1, n // 8)):
+        cv2.line(frame, bot_ok[i], top_ok[i], ZONE_EDGE_COLOR, 1)
+
     return frame
 
 
@@ -326,12 +380,11 @@ def run(
                         if poly is not None:
                             cv2.polylines(frame, [poly.astype(np.int32)], True, DOOR_POLY_COLOR, 2)
 
-                        # Build + draw the keep-clear half-cylinder zone.
+                        # Build + draw the 3D keep-clear half-cylinder zone.
                         door_xyz = (X, door_center_y, Z)   # footprint X/Z at door center
-                        bottom_arc, top_arc = _half_cylinder_arcs(
-                            door_xyz, radius, door_bottom_y, door_top_y, intr
+                        frame = _draw_zone(
+                            frame, door_xyz, radius, door_bottom_y, door_top_y, intr
                         )
-                        frame = _draw_zone(frame, bottom_arc, top_arc)
 
                         cv2.putText(
                             frame, f"door Z={Z:.2f}m  zone r={radius:.1f}m  h={door_height_3d:.2f}m",

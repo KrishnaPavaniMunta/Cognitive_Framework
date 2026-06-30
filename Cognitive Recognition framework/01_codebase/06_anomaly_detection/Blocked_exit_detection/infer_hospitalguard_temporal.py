@@ -1290,11 +1290,11 @@ def annotate_image(
             x1b, y1b, x2b, y2b = det
             cv2.rectangle(overlay, (x1b, y1b), (x2b, y2b), (255, 255, 0), -1)
         cv2.addWeighted(overlay, 0.15, scene, 0.85, 0, scene)
-        scene = sv.BoxAnnotator(thickness=2).annotate(
+        scene = sv.BoxAnnotator(thickness=1]).annotate(
             scene=scene, detections=yolo_sv
         )
         scene = sv.LabelAnnotator(
-            text_scale=0.5, text_thickness=1, text_padding=4
+            text_scale=0.5, text_thickness=0.5, text_padding=4
         ).annotate(scene=scene, detections=yolo_sv, labels=yolo_labels)
 
     # ── DINO boxes (cv2 — ensures colour independence from sv version) ─────

@@ -46,6 +46,10 @@ DINO_BOX_THR    = 0.30
 DINO_TEXT_THR   = 0.35
 DINO_INTERVAL   = 15   # run DINO fallback every N frames
 HOLD_FRAMES     = 15   # hold last SAM/DINO result for N frames
+DINO_HOLD_FRAMES = 15
+
+held_dino_detections = []
+held_dino_age = DINO_HOLD_FRAMES + 1
 
 # ── YOLO settings ─────────────────────────────────────────────────────────────
 YOLO_CONF = 0.45
@@ -74,13 +78,14 @@ from grounded_sam import GroundedSAMRefiner  # noqa: E402
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _assert_gpu() -> str:
-    if torch.cuda.is_available():
-        name = torch.cuda.get_device_name(0)
-        print(f"[INIT] GPU: {name}")
-        return "cuda"
-    else:
-        print("[WARN] No CUDA GPU detected, falling back to CPU (slower)")
-        return "cpu"
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "No CUDA GPU detected. This script requires a GPU.\n"
+            "Check: nvidia-smi"
+        )
+    name = torch.cuda.get_device_name(0)
+    print(f"[INIT] GPU: {name}")
+    return "cuda"
 
 
 def _is_door_label(label: str) -> bool:
