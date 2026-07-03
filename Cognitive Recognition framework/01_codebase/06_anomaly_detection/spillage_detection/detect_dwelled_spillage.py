@@ -28,6 +28,10 @@ DEFAULT_CONF_THRESH = 0.25
 IOU_THRESH = 0.45
 DINO_VIDEO_INTERVAL_FRAMES = 15
 DINO_HOLD_FRAMES = 10
+DINO_HOLD_IOU_THRESH = 0.12
+DINO_HOLD_MIN_CONF = 0.08
+DINO_MAX_HOLD_BOXES = 3
+DINO_TO_YOLO_SUPPRESS_IOU = 0.50
 
 # ── Spillage Dwell Configuration ───────────────────────────────────────────────
 SPILLAGE_DWELL_THRESHOLD_SEC = 5.0
@@ -52,7 +56,7 @@ DINO_MODEL_ID = "IDEA-Research/grounding-dino-base"
 
 # Enhanced language query optimized explicitly for specular reflections of clear liquids
 DINO_FALLBACK = {
-    "spillage": ("clear liquid puddle on floor reflection. splash. water spill. water spill. transparent spill splash.", 0.28),
+    "spillage": ("water on floor. splash. water spill. transparent spill splash.", 0.10),
 }
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
@@ -63,8 +67,7 @@ _dino_model = None
 CLASS_COLORS = {}
 
 # Stateless Global Continuous Variables (Replaces Trackers entirely)
-_spillage_detected_frames_run = 0
-_spillage_alert_triggered = False
+_spillage_present_last_frame = False
 
 def get_yolo_color(class_name):
     return (0, 0, 255)  # Pure Red for spillage anomalies
@@ -140,9 +143,83 @@ def run_dino_fallback(pil_image, target_classes):
 
     return dino_boxes
 
+def compute_iou_xyxy(box_a, box_b):
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
+
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+
+    inter_w = max(0.0, inter_x2 - inter_x1)
+    inter_h = max(0.0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union_area = area_a + area_b - inter_area
+
+    if union_area <= 0.0:
+        return 0.0
+    return inter_area / union_area
+
+def suppress_dino_with_yolo(predictions, iou_thresh=DINO_TO_YOLO_SUPPRESS_IOU):
+    if not predictions:
+        return []
+
+    yolo_preds = [p for p in predictions if not p[5].startswith("[DINO] ")]
+    dino_preds = [p for p in predictions if p[5].startswith("[DINO] ")]
+    if not yolo_preds or not dino_preds:
+        return predictions
+
+    kept_dino = []
+    for d in dino_preds:
+        d_cls = d[5].replace("[DINO] ", "")
+        d_box = d[:4]
+
+        suppress = False
+        for y in yolo_preds:
+            y_cls = y[5].replace("[DINO] ", "")
+            if y_cls != d_cls:
+                continue
+            if compute_iou_xyxy(d_box, y[:4]) >= iou_thresh and y[4] >= d[4]:
+                suppress = True
+                break
+
+        if not suppress:
+            kept_dino.append(d)
+
+    return yolo_preds + kept_dino
+
+def build_held_dino_predictions(held_dino_detections, held_dino_age, yolo_preds):
+    if not held_dino_detections or held_dino_age > DINO_HOLD_FRAMES:
+        return []
+
+    decay = max(0.0, 1.0 - (held_dino_age / max(float(DINO_HOLD_FRAMES), 1.0)))
+    yolo_boxes = [p[:4] for p in yolo_preds]
+
+    hold_preds = []
+    for x1, y1, x2, y2, conf, name in held_dino_detections:
+        decayed_conf = conf * decay
+        if decayed_conf < DINO_HOLD_MIN_CONF:
+            continue
+
+        if yolo_boxes:
+            max_iou = max(compute_iou_xyxy((x1, y1, x2, y2), y_box) for y_box in yolo_boxes)
+            if max_iou < DINO_HOLD_IOU_THRESH:
+                continue
+
+        hold_preds.append((x1, y1, x2, y2, decayed_conf, name))
+
+    hold_preds.sort(key=lambda p: p[4], reverse=True)
+    return hold_preds[:DINO_MAX_HOLD_BOXES]
+
 def apply_global_nms(predictions, iou_thresh=0.45):
     if not predictions:
         return []
+
+    predictions = suppress_dino_with_yolo(predictions)
         
     boxes = torch.tensor([[p[0], p[1], p[2], p[3]] for p in predictions], dtype=torch.float32)
     scores = torch.tensor([p[4] for p in predictions], dtype=torch.float32)
@@ -162,30 +239,21 @@ def apply_global_nms(predictions, iou_thresh=0.45):
     return [predictions[i] for i in kept_indices]
 
 # ── Stateless Alert Logic ───────────────────────────────────────────────────────
-def _process_stateless_timer_logic(final_detections, fps):
-    """ Increments a single global counter frame-by-frame if any spillage is present """
-    global _spillage_detected_frames_run, _spillage_alert_triggered
-    
+def _process_instant_alert_logic(final_detections):
+    """Raise alert immediately when spillage appears in frame (no timer/dwell)."""
+    global _spillage_present_last_frame
+
     spillage_present = any("spillage" in d[5].lower() for d in final_detections)
-    
-    if spillage_present:
-        _spillage_detected_frames_run += 1
-        current_dwell_time = _spillage_detected_frames_run / max(fps, 1.0)
-        
-        if current_dwell_time >= SPILLAGE_DWELL_THRESHOLD_SEC and not _spillage_alert_triggered:
-            print(f"\n[ALERT SYSTEM] !!! CRITICAL ENVIRONMENTAL HAZARD !!!")
-            print(f" -> Spillage presence has remaned visible for over {current_dwell_time:.2f} seconds continuously.")
-            print(f" -> System Timestamp: {datetime.now().strftime('%H:%M:%S')} | Action Logged.\n")
-            _spillage_alert_triggered = True
-    else:
-        # Puddle gone or moved out of frame — reset counter blocks immediately
-        _spillage_detected_frames_run = 0
-        _spillage_alert_triggered = False
+
+    if spillage_present and not _spillage_present_last_frame:
+        print(f"\n[ALERT SYSTEM] !!! CRITICAL ENVIRONMENTAL HAZARD !!!")
+        print(" -> Spillage detected in frame. Immediate alert raised.")
+        print(f" -> System Timestamp: {datetime.now().strftime('%H:%M:%S')} | Action Logged.\n")
+
+    _spillage_present_last_frame = spillage_present
 
 # ── Render Utilities ───────────────────────────────────────────────────────────
 def draw_predictions(frame, final_detections, fps=25.0):
-    global _spillage_detected_frames_run
-    
     for x1, y1, x2, y2, conf, name in final_detections:
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
         
@@ -193,16 +261,13 @@ def draw_predictions(frame, final_detections, fps=25.0):
         text_color = (255, 255, 255)
         
         clean_name = name.replace("[DINO] ", "")
-        current_dwell = _spillage_detected_frames_run / max(fps, 1.0)
-        label = f"{clean_name} ({current_dwell:.1f}s) {conf:.1%}"
+        label = f"{clean_name} {conf:.1%}"
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-        
-        # Thicken box and flash warning string across matrix if threshold breached
-        if current_dwell >= SPILLAGE_DWELL_THRESHOLD_SEC:
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 4)
-            cv2.putText(frame, "CRITICAL: DWELLED LIQUID HAZARD", (x1, max(y1 - 30, 20)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2, cv2.LINE_AA)
+
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 4)
+        cv2.putText(frame, "CRITICAL: SPILLAGE DETECTED", (x1, max(y1 - 30, 20)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2, cv2.LINE_AA)
 
         (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
         cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw + 10, y1), box_color, -1)
@@ -216,7 +281,7 @@ def process_image(v1, v2, v3, img_path):
     pil_img = Image.open(img_path).convert("RGB")
     
     preds = run_yolo_ensemble(v1, v2, v3, frame)
-    seen_classes = set([p[4] for p in preds])
+    seen_classes = {p[5].replace("[DINO] ", "") for p in preds}
     missing_targets = [c for c in DINO_FALLBACK.keys() if c not in seen_classes]
     
     dino_preds = run_dino_fallback(pil_img, missing_targets)
@@ -230,7 +295,7 @@ def process_image(v1, v2, v3, img_path):
     print(f"[SUCCESS] Image parsed cleanly: {out_path.resolve()}")
 
 def process_video(v1, v2, v3, vid_path):
-    global _spillage_detected_frames_run, _spillage_alert_triggered
+    global _spillage_present_last_frame
     cap = cv2.VideoCapture(str(vid_path))
     width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -243,8 +308,7 @@ def process_video(v1, v2, v3, vid_path):
     frame_idx = 0
     
     # Flush global state variables before beginning stream execution
-    _spillage_detected_frames_run = 0
-    _spillage_alert_triggered = False
+    _spillage_present_last_frame = False
     
     held_dino_detections = []
     held_dino_age = DINO_HOLD_FRAMES + 1
@@ -255,9 +319,10 @@ def process_video(v1, v2, v3, vid_path):
         frame_idx += 1
         
         preds = run_yolo_ensemble(v1, v2, v3, frame)
+        yolo_preds = list(preds)
         
         run_dino_now = (
-            frame_idx > 1 and
+            frame_idx == 1 or
             ((frame_idx - 1) % DINO_VIDEO_INTERVAL_FRAMES == 0)
         )
 
@@ -272,13 +337,12 @@ def process_video(v1, v2, v3, vid_path):
         else:
             held_dino_age += 1
 
-        if held_dino_age <= DINO_HOLD_FRAMES:
-            preds.extend(held_dino_detections) 
+        preds.extend(build_held_dino_predictions(held_dino_detections, held_dino_age, yolo_preds))
                 
         final_dets = apply_global_nms(preds, IOU_THRESH)
         
-        # Calculate stateless continuous duration
-        _process_stateless_timer_logic(final_dets, fps)
+        # Immediate alert on any detected spillage (no dwell timer)
+        _process_instant_alert_logic(final_dets)
         annotated = draw_predictions(frame, final_dets, fps=fps)
             
         writer.write(annotated)
