@@ -1,0 +1,7 @@
+{
+    "max_normal_error": 7684.458984375,
+    "threshold_multiplier": 3.0,
+    "anomaly_threshold": 23053.376953125,
+    "features": 51,
+    "window_size": 30
+}
