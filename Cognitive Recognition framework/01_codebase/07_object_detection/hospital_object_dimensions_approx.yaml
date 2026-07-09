@@ -23,14 +23,23 @@ objects:
       width: [0.2, 0.45]
       height: [0.1, 0.25]
 
-  bin:
+  small_bin:
     typical:
-      width: 0.45
-      height: 0.75
-      depth: 0.4
+      width: 0.3
+      height: 0.4
+      depth: 0.3
     range:
-      width: [0.25, 0.7]
-      height: [0.35, 0.9]
+      width: [0.25, 0.55]
+      height: [0.30, 0.65]
+
+  large_bin:
+    typical:
+      width: 0.7
+      height: 1.0
+      depth: 0.7
+    range:
+      width: [0.55, 0.90]
+      height: [0.75, 1.30]
 
   oxygen_pump:
     typical:

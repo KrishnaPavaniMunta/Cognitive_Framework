@@ -17,14 +17,19 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
 import cv2
 import numpy as np
-from rosbags.highlevel import AnyReader
 from rosbags.typesys import Stores, get_typestore
+
+try:
+    import zstandard as zstd
+except Exception:  # pragma: no cover - zstd should normally be available
+    zstd = None
 
 # ── Default topics for the Saxon hallway bag ──────────────────────────────────
 RGB_TOPIC         = "/camera/rgb/image_rect_color"
@@ -114,6 +119,29 @@ def _camera_info_to_intrinsics(msg) -> CameraIntrinsics:
     )
 
 
+def _resolve_db3_files(bag_path: Path) -> list[Path]:
+    """Return rosbag2 sqlite files from either a bag directory or a single .db3 file."""
+    if bag_path.is_file():
+        if bag_path.suffix.lower() != ".db3":
+            raise RuntimeError(f"Unsupported bag file type (expected .db3): {bag_path}")
+        return [bag_path]
+
+    db3_files = sorted(bag_path.glob("*.db3"))
+    if not db3_files:
+        raise RuntimeError(f"No .db3 files found in bag path: {bag_path}")
+    return db3_files
+
+
+def _maybe_decompress_zstd(payload: bytes) -> bytes:
+    """Decompress zstd-compressed rosbag payloads when needed."""
+    zstd_magic = b"\x28\xb5\x2f\xfd"
+    if payload.startswith(zstd_magic):
+        if zstd is None:
+            raise RuntimeError("zstandard is required to read compressed rosbag payloads")
+        return zstd.ZstdDecompressor().decompress(payload)
+    return payload
+
+
 # ── Bag reading ───────────────────────────────────────────────────────────────
 
 def read_intrinsics(
@@ -122,13 +150,37 @@ def read_intrinsics(
 ) -> CameraIntrinsics:
     """Read the first CameraInfo message and return aligned intrinsics."""
     typestore = get_typestore(Stores.ROS2_HUMBLE)
-    with AnyReader([bag_dir], default_typestore=typestore) as reader:
-        conns = [c for c in reader.connections if c.topic == camera_info_topic]
-        if not conns:
-            raise RuntimeError(f"CameraInfo topic not found: {camera_info_topic}")
-        for conn, _, raw in reader.messages(connections=conns):
-            msg = reader.deserialize(raw, conn.msgtype)
-            return _camera_info_to_intrinsics(msg)
+    db3_files = _resolve_db3_files(Path(bag_dir))
+
+    for db3 in db3_files:
+        conn = sqlite3.connect(str(db3))
+        try:
+            cur = conn.cursor()
+            topics = {
+                int(topic_id): (name, msgtype)
+                for topic_id, name, msgtype in cur.execute("SELECT id, name, type FROM topics")
+            }
+            camera_topic_ids = [tid for tid, (name, _) in topics.items() if name == camera_info_topic]
+            if not camera_topic_ids:
+                continue
+
+            placeholders = ",".join("?" for _ in camera_topic_ids)
+            query = (
+                f"SELECT topic_id, data FROM messages "
+                f"WHERE topic_id IN ({placeholders}) ORDER BY timestamp"
+            )
+            for topic_id, data in cur.execute(query, camera_topic_ids):
+                raw = bytes(data)
+                _, msgtype = topics[int(topic_id)]
+                try:
+                    raw = _maybe_decompress_zstd(raw)
+                    msg = typestore.deserialize_cdr(raw, msgtype)
+                except Exception:
+                    continue
+                return _camera_info_to_intrinsics(msg)
+        finally:
+            conn.close()
+
     raise RuntimeError(f"No CameraInfo messages on {camera_info_topic}")
 
 
@@ -146,40 +198,104 @@ def iter_rgbd_frames(
     recent depth frame within `max_time_diff` seconds.
     """
     typestore = get_typestore(Stores.ROS2_HUMBLE)
-    with AnyReader([bag_dir], default_typestore=typestore) as reader:
-        topics = {c.topic for c in reader.connections}
-        missing = [t for t in (rgb_topic, depth_topic) if t not in topics]
-        if missing:
-            raise RuntimeError(f"Missing required topics in bag: {missing}")
+    db3_files = _resolve_db3_files(Path(bag_dir))
 
-        conns = [c for c in reader.connections if c.topic in (rgb_topic, depth_topic)]
+    all_topics: set[str] = set()
+    topic_map_by_db: list[dict[int, tuple[str, str]]] = []
+    for db3 in db3_files:
+        conn = sqlite3.connect(str(db3))
+        try:
+            cur = conn.cursor()
+            topic_map = {
+                int(topic_id): (name, msgtype)
+                for topic_id, name, msgtype in cur.execute("SELECT id, name, type FROM topics")
+            }
+            topic_map_by_db.append(topic_map)
+            all_topics.update(name for name, _ in topic_map.values())
+        finally:
+            conn.close()
 
-        pending_depth_ts: float | None = None
-        pending_depth_img: np.ndarray | None = None
-        yielded = 0
+    missing = [t for t in (rgb_topic, depth_topic) if t not in all_topics]
+    if missing:
+        raise RuntimeError(f"Missing required topics in bag: {missing}")
 
-        for conn, _, raw in reader.messages(connections=conns):
-            msg = reader.deserialize(raw, conn.msgtype)
-            ts = _ros_time_to_float(msg.header.stamp.sec, msg.header.stamp.nanosec)
+    pending_depth_ts: float | None = None
+    pending_depth_img: np.ndarray | None = None
+    yielded = 0
+    skipped_decompress = 0
+    skipped_deserialize = 0
 
-            if conn.topic == depth_topic:
-                depth = _decode_depth_image_mm(msg)
-                if depth is not None:
-                    pending_depth_ts = ts
-                    pending_depth_img = depth
-                continue
+    for db3_idx, db3 in enumerate(db3_files):
+        topic_map = topic_map_by_db[db3_idx]
+        wanted_ids = [tid for tid, (name, _) in topic_map.items() if name in (rgb_topic, depth_topic)]
+        if not wanted_ids:
+            continue
 
-            # conn.topic == rgb_topic
-            rgb = _decode_color_image(msg)
-            if rgb is None or pending_depth_img is None:
-                continue
-            if abs(ts - pending_depth_ts) > max_time_diff:
-                continue
+        placeholders = ",".join("?" for _ in wanted_ids)
+        query = (
+            f"SELECT topic_id, timestamp, data FROM messages "
+            f"WHERE topic_id IN ({placeholders}) ORDER BY timestamp"
+        )
 
-            yield RGBDFrame(timestamp=ts, rgb=rgb, depth_mm=pending_depth_img)
-            yielded += 1
-            if max_frames > 0 and yielded >= max_frames:
-                return
+        conn = sqlite3.connect(str(db3))
+        try:
+            cur = conn.cursor()
+            for topic_id, timestamp_ns, data in cur.execute(query, wanted_ids):
+                topic, msgtype = topic_map[int(topic_id)]
+                raw = bytes(data)
+
+                try:
+                    raw = _maybe_decompress_zstd(raw)
+                except Exception as exc:
+                    skipped_decompress += 1
+                    if skipped_decompress <= 10:
+                        print(
+                            f"[RGBD] Warning: skipped corrupted compressed message "
+                            f"({db3.name}, topic={topic}): {exc}"
+                        )
+                    continue
+
+                try:
+                    msg = typestore.deserialize_cdr(raw, msgtype)
+                except Exception as exc:
+                    skipped_deserialize += 1
+                    if skipped_deserialize <= 10:
+                        print(
+                            f"[RGBD] Warning: skipped undecodable message "
+                            f"({db3.name}, topic={topic}): {exc}"
+                        )
+                    continue
+
+                try:
+                    ts = _ros_time_to_float(msg.header.stamp.sec, msg.header.stamp.nanosec)
+                except Exception:
+                    ts = float(timestamp_ns) * 1e-9
+
+                if topic == depth_topic:
+                    depth = _decode_depth_image_mm(msg)
+                    if depth is not None:
+                        pending_depth_ts = ts
+                        pending_depth_img = depth
+                    continue
+
+                # topic == rgb_topic
+                rgb = _decode_color_image(msg)
+                if rgb is None or pending_depth_img is None or pending_depth_ts is None:
+                    continue
+                if abs(ts - pending_depth_ts) > max_time_diff:
+                    continue
+
+                yield RGBDFrame(timestamp=ts, rgb=rgb, depth_mm=pending_depth_img)
+                yielded += 1
+                if max_frames > 0 and yielded >= max_frames:
+                    return
+        finally:
+            conn.close()
+
+    if skipped_decompress > 10:
+        print(f"[RGBD] Warning: skipped {skipped_decompress} corrupted compressed messages in total.")
+    if skipped_deserialize > 10:
+        print(f"[RGBD] Warning: skipped {skipped_deserialize} undecodable messages in total.")
 
 
 def _depth_to_colormap(depth_mm: np.ndarray, max_mm: int = 5000) -> np.ndarray:

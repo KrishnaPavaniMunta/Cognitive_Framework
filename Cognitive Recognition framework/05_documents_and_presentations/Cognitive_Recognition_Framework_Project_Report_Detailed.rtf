@@ -1,0 +1,370 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Calibri;}{\f1 Consolas;}}
+\paperw12240\paperh15840\margl1440\margr1440\margt1200\margb1200
+\fs24
+\b Cognitive Recognition Framework\b0\par
+\b Comprehensive Technical Project Report\b0\par
+\par
+\b Report Version\b0: 2.0 (Detailed)\par
+\b Date\b0: 2026-07-08\par
+\b Workspace\b0: Cognitive Recognition framework\par
+\par
+\b 1. Executive Overview\b0\par
+The Cognitive Recognition Framework is a hospital-focused computer vision platform designed for operational safety monitoring, object understanding, and anomaly detection in clinical environments. The system combines multi-model object detection, temporal identity tracking, RGB-D depth reasoning, and rule-based safety analytics in one integrated architecture.\par
+\par
+At a high level, the framework answers four mission-critical questions:\par
+1. What objects are present in the scene now?\par
+2. Are those detections stable over time and tied to persistent identities?\par
+3. Are the detected objects physically plausible in 3D space?\par
+4. Do the observed objects indicate safety anomalies (for example blocked exits, obstructed door zones, or hazardous spillage)?\par
+\par
+The project goes beyond raw detection by adding context gating, depth-based geometric validation, and temporal memory. This improves reliability for hospital operations where false alarms and missed hazards have direct safety impact.\par
+\par
+\b 2. Business and Operational Intent\b0\par
+Primary intent is to support hospital safety and operational awareness across corridors, wards, treatment spaces, and transitional zones.\par
+\par
+Target outcomes:\par
+- Detect important clinical and infrastructure objects reliably.\par
+- Maintain temporal continuity for moving and static assets.\par
+- Reduce false positives using real-world physical constraints.\par
+- Provide actionable and auditable anomaly alerts, especially for exit safety and obstruction monitoring.\par
+- Produce logs and visual evidence suitable for engineering validation and stakeholder reporting.\par
+\par
+\b 3. Scope of the Repository\b0\par
+The workspace is structured to separate code, models, data, outputs, and documentation:\par
+- 01_codebase: training, inference, RGB-D, anomaly detection, and object filtering logic.\par
+- 02_datasets: datasets and testing media.\par
+- 03_models_and_weights: model artifacts and promoted weights.\par
+- 04_outputs_runs_and_logs: generated videos, logs, validation outputs, and run artifacts.\par
+- 05_documents_and_presentations: technical documents and stakeholder material.\par
+- 06_database: DB initialization and query scripts.\par
+- 07_environment_and_project_meta: environment setup and requirements.\par
+- 08_media_and_3d_assets: auxiliary assets for visualization and experimentation.\par
+- 09_misc and 10_Testing: helper workflows and validation runs.\par
+\par
+\b 4. System Architecture\b0\par
+\b 4.1 Logical Layers\b0\par
+The implementation follows a layered strategy:\par
+Layer A: Data preparation and class harmonization.\par
+Layer B: Base object detection (YOLO models).\par
+Layer C: Selective open-vocabulary recovery (Grounding DINO).\par
+Layer D: Temporal identity persistence (ByteTrack and room-state memory).\par
+Layer E: RGB-D spatial reconstruction and 3D consistency checks.\par
+Layer F: Rule-based anomaly and safety analytics.\par
+Layer G: Reporting and persistence (Excel, CSV, annotated media, SQLite).\par
+\par
+\b 4.2 Why Layered Instead of Single-Model\b0\par
+A single detector cannot simultaneously maximize speed, recall on weak classes, temporal stability, and physical plausibility. The architecture intentionally distributes responsibilities:\par
+- YOLO handles high-throughput core detection.\par
+- DINO recovers weak or missed classes with contextual safeguards.\par
+- ByteTrack and hold logic stabilize object continuity and IDs.\par
+- RGB-D plus geometric filters enforce real-world constraints.\par
+- Rule engines convert detections into safety outcomes.\par
+\par
+\b 5. Data Preparation and Curation Pipeline\b0\par
+Data preparation scripts are responsible for class quality, split integrity, and training balance.\par
+\par
+\b 5.1 Class Filtering and Remapping\b0\par
+The preparation flow applies minimum class-support thresholds for train and validation sets. Classes with insufficient representation are removed, surviving classes are remapped to a compact contiguous index range, and labels are rewritten accordingly.\par
+\par
+Benefits:\par
+- Removes ultra-sparse classes that destabilize optimization.\par
+- Keeps class IDs coherent for downstream training and inference.\par
+- Improves precision of reported metrics by reducing noisy tails.\par
+\par
+\b 5.2 Image Retention Rules\b0\par
+If an image loses all labels after filtering, the image is dropped from the curated dataset. This prevents unlabeled noise from entering training and distorting negative sampling behavior.\par
+\par
+\b 5.3 Oversampling Strategy\b0\par
+Minority classes are boosted using controlled duplication with constraints (copy caps and deterministic seed behavior). In V3 extension workflows, class-specific oversampling priorities are used for low-frequency safety classes such as spillage and exit_sign.\par
+\par
+\b 5.4 Dataset Split and Versioning\b0\par
+Additional scripts split newly imported datasets into train and validation partitions and generate aligned YAML descriptors. These scripts preserve repeatability through fixed seeds and standardized folder conventions.\par
+\par
+\b 6. Model Strategy and Class Evolution\b0\par
+\b 6.1 Baseline Model Expansion\b0\par
+The training lineage expands from a merged detector space built from COCO and hospital classes to a larger 109-class taxonomy.\par
+\par
+Important class milestones:\par
+- 106-class model: 80 COCO + 26 hospital classes.\par
+- 109-class model: adds bag, exit_sign, spillage.\par
+\par
+\b 6.2 Two-Phase Freeze Training\b0\par
+Training scripts implement two-phase adaptation:\par
+Phase 1: stronger layer freeze to adapt the output head safely.\par
+Phase 2: partial unfreeze with lower learning rate for refined convergence.\par
+\par
+Why this works:\par
+- Protects pretrained low-level features early.\par
+- Reduces catastrophic drift during class expansion.\par
+- Improves convergence stability for newly added classes.\par
+\par
+\b 6.3 Class Mapping Governance\b0\par
+Class remapping between source datasets and merged IDs is explicitly encoded in scripts, reducing hidden assumptions and enabling reproducible lineage audits.\par
+\par
+\b 7. Core Inference System\b0\par
+\b 7.1 Inference Modes\b0\par
+The codebase supports multiple inference entry points:\par
+- Single-model V3 inference for quick validation.\par
+- V1 plus V3 ensemble inference for broader coverage.\par
+- Interactive image and video inference with batch and URL workflows.\par
+- Temporal and RGB-D variants for sequence processing.\par
+\par
+\b 7.2 Ensemble Routing Logic\b0\par
+The ensemble path uses class-aware routing:\par
+- New classes unique to V3 are sourced from V3.\par
+- Overlap classes are merged across V1 and V3 via NMS.\par
+- Remaining classes are inherited from the designated base model route.\par
+\par
+This avoids naive averaging and preserves class ownership semantics.\par
+\par
+\b 7.3 Confidence and IoU Controls\b0\par
+Inference scripts use consistent confidence and IoU thresholds, then add class-specific post-filters for known confusion cases. The approach is intentionally pragmatic: use global defaults plus targeted corrections where model behavior in clinical scenes is known.\par
+\par
+\b 8. Grounding DINO Fallback Design\b0\par
+\b 8.1 Purpose\b0\par
+DINO is used as selective recall recovery, not as a full replacement for YOLO. It is activated where YOLO confidence is weak, classes are rare, or domain shift is severe in real hospital-like scenes.\par
+\par
+\b 8.2 Precision Guardrails\b0\par
+DINO usage is tightly controlled through:\par
+- per-class prompts and thresholds,\par
+- isolated querying for highly confusable classes,\par
+- SAHI slicing for tiny object visibility improvement,\par
+- context-anchor gates requiring supporting scene evidence,\par
+- maximum box-area constraints to suppress scene-scale false regions.\par
+\par
+\b 8.3 Result\b0\par
+This design balances recall improvement and false-positive control, especially for critical classes like surgical_scissor, iv_stand, exit_sign, and select PPE/infrastructure targets.\par
+\par
+\b 9. Temporal Tracking and Identity Persistence\b0\par
+\b 9.1 ByteTrack Integration\b0\par
+Temporal scripts apply ByteTrack over per-frame detections to assign persistent track IDs. This transforms frame-local detections into trajectory-level entities.\par
+\par
+\b 9.2 Occlusion Handling\b0\par
+Lost-track buffering allows IDs to persist across short occlusions. If an object reappears within the configured horizon, the same ID is retained. This reduces identity churn and improves operational interpretability.\par
+\par
+\b 9.3 Room-State Memory\b0\par
+Additional room-state hold logic preserves recent object states for a stale-frame window. This smooths temporary detector dropouts and supports robust alert logic (for example PPE or obstruction conditions) without flicker.\par
+\par
+\b 9.4 Temporal Alert Features\b0\par
+Temporal variants include egress-aware logic:\par
+- Exit ROI occupancy duration thresholds.\par
+- Door and exit_sign geometric consistency checks.\par
+- Optional synthetic door generation from exit_sign geometry if door detection drops.\par
+\par
+\b 10. RGB-D Spatial Twin and 3D Reasoning\b0\par
+\b 10.1 Sequence Replay and Synchronization\b0\par
+RGB-D scripts replay TUM-style datasets by pairing nearest RGB and depth timestamps under a configurable maximum time difference.\par
+\par
+\b 10.2 Camera Model and Back-Projection\b0\par
+Using camera intrinsics, 2D detections are back-projected into metric 3D coordinates. This enables distance estimation, spatial memory logging, and physically grounded checks.\par
+\par
+\b 10.3 Spatial Database Integration\b0\par
+A SQLite spatial_memory table stores timestamped object class, tracker identity, and XYZ coordinates. This acts as a lightweight digital twin backbone for later querying and analysis.\par
+\par
+\b 10.4 Hardware and Sensor Paths\b0\par
+The ecosystem supports multiple RGB-D paths (TUM replays, RealSense/OpenNI/Orbbec variants), with dedicated scripts and environment configurations for strict GPU execution where needed.\par
+\par
+\b 11. Object Plausibility and 3D Filtering\b0\par
+\b 11.1 Common-Sense Rule Filter\b0\par
+A rule module applies quick scene sanity checks to remove physically absurd detections (for example implausible location, extreme aspect ratios, or floor/ceiling contradictions for certain classes).\par
+\par
+\b 11.2 Dimension-Driven 3D Validation\b0\par
+A YAML reference file contains approximate hospital object sizes in meters with typical and acceptable ranges. The 3D filter module uses these limits to validate detection plausibility after depth back-projection.\par
+\par
+Notable behavior:\par
+- Bin size gating is active through small_bin and large_bin constraints.\par
+- Spillage can be rejected when estimated floor clearance exceeds configured threshold (0.10 m).\par
+\par
+\b 11.3 Geometric Method\b0\par
+The filter performs orientation-robust dimension estimation using PCA over back-projected points, then compares estimated width and height to class-specific thresholds. This is more robust than axis-aligned pixel heuristics.\par
+\par
+\b 12. Anomaly Detection Subsystem\b0\par
+\b 12.1 Blocked Exit and Door-Zone Logic\b0\par
+The blocked-exit branch fuses YOLO, DINO, SAM segmentation, RGB-D geometry, and temporal hold cadence to identify persistent obstructions in keep-clear zones around doors.\par
+\par
+Core process:\par
+1. Detect and segment door region.\par
+2. Construct 3D keep-clear geometry (half-cylinder style safety zone).\par
+3. Detect non-door objects and refine masks.\par
+4. Back-project object mask points to 3D.\par
+5. Flag blockage if object points intersect zone over sustained duration.\par
+\par
+\b 12.2 Robust Bag Reading\b0\par
+Reader logic for rosbag2 sqlite streams includes corruption-tolerant behavior, skipping broken zstd/deserialization rows rather than aborting the entire stream. This is important for recovered datasets with partial damage.\par
+\par
+\b 12.3 Door Distance and Safety Output\b0\par
+Distance-focused scripts and obstruction outputs are persisted to AD_Rules_Outputs as timestamped video and CSV artifacts for review and traceability.\par
+\par
+\b 13. Persistence, Logs, and Auditability\b0\par
+The framework emits multiple evidence channels:\par
+- Annotated image and video artifacts for visual inspection.\par
+- CSV logs for sequence-level numerical analysis.\par
+- Excel logs with TP/FP/FN/TN style QA summaries.\par
+- SQLite records for temporal-spatial retrieval and post-hoc analytics.\par
+\par
+This multi-format persistence model supports both ML debugging and operational compliance workflows.\par
+\par
+\b 14. Feature Inventory\b0\par
+\b 14.1 Detection Features\b0\par
+- 106 and 109 class hospital detection lineages.\par
+- V1/V3 ensemble with class-aware fusion.\par
+- Per-class thresholding and post-filters.\par
+- Batch and interactive inference modes.\par
+\par
+\b 14.2 Recovery and Robustness Features\b0\par
+- Targeted DINO fallback for weak classes.\par
+- Context-anchor constraints and isolated prompt mode.\par
+- SAHI slicing for small object recovery.\par
+- Area caps and scene-specific false-positive suppression.\par
+\par
+\b 14.3 Temporal Features\b0\par
+- ByteTrack ID persistence.\par
+- Lost-track buffer and hold windows.\par
+- Room-state memory to reduce flicker.\par
+- Exit blockage duration and consistency checks.\par
+\par
+\b 14.4 RGB-D and 3D Features\b0\par
+- RGB-depth synchronization.\par
+- Intrinsics-based XYZ reconstruction.\par
+- SQLite spatial memory logging.\par
+- 3D plausibility filtering with object size priors.\par
+\par
+\b 14.5 Safety and Rule Features\b0\par
+- Door keep-clear zone modeling.\par
+- 3D zone-object intersection checks.\par
+- Spillage floor-contact logic.\par
+- Common-sense placement and shape heuristics.\par
+\par
+\b 15. System Workflows by Scenario\b0\par
+\b Scenario A: Model Development\b0\par
+- Prepare and curate datasets.\par
+- Train base model with staged freeze strategy.\par
+- Expand class space and retrain V3 with selective oversampling.\par
+- Validate with batch scripts and logs.\par
+\par
+\b Scenario B: Online Detection\b0\par
+- Run ensemble detection on image or video stream.\par
+- Trigger DINO only where required by policy.\par
+- Apply post-filters and produce annotated output and logs.\par
+\par
+\b Scenario C: Temporal Monitoring\b0\par
+- Detect per frame, track by ID, smooth with hold logic.\par
+- Evaluate occupancy and obstruction conditions over time.\par
+- Trigger alerts when duration thresholds are exceeded.\par
+\par
+\b Scenario D: RGB-D Safety Intelligence\b0\par
+- Read synchronized RGB and depth.\par
+- Convert detections to metric space.\par
+- Validate physical plausibility.\par
+- Persist trajectories and run anomaly geometry checks.\par
+\par
+\b 16. Performance and Reliability Considerations\b0\par
+\b 16.1 Speed-Accuracy Tradeoff\b0\par
+By keeping YOLO as primary detector and constraining DINO frequency and class scope, the system preserves practical throughput while improving weak-class recall.\par
+\par
+\b 16.2 False Positive Mitigation\b0\par
+Mitigation stack includes class-specific confidence floors, context anchors, area limits, common-sense rules, and depth-based physical constraints.\par
+\par
+\b 16.3 Domain Shift Handling\b0\par
+The framework explicitly acknowledges that validation AP does not guarantee identical deployment performance. Runtime fallbacks and rule layers are used to compensate for real-world scene shift.\par
+\par
+\b 17. Testing and Validation Strategy\b0\par
+Current validation patterns in the repository include:\par
+- Batch image testing for selected target classes.\par
+- Comparative scripts for model version analysis.\par
+- Temporal replay inspections with annotated outputs.\par
+- RGB-D obstruction and zone checks against recorded sequences.\par
+\par
+Recommended additional maturity steps:\par
+1. Standardized benchmark manifests for every use case.\par
+2. Regression suites for key safety classes and anomaly events.\par
+3. Automated schema checks for logs and DB outputs.\par
+4. Consistent environment profile checks before run execution.\par
+\par
+\b 18. Deployment and Operations Guidance\b0\par
+\b 18.1 Environment Profiles\b0\par
+The project contains standard and hardware-specific requirements sets, including strict GPU paths for sensor-backed workflows.\par
+\par
+\b 18.2 Run Discipline\b0\par
+For stable operations:\par
+- Use consistent model path conventions.\par
+- Keep output roots standardized per pipeline family.\par
+- Include run tags and timestamps in artifacts.\par
+- Archive configs together with outputs for reproducibility.\par
+\par
+\b 18.3 Operational Monitoring\b0\par
+Monitor:\par
+- per-class detection confidence distributions,\par
+- alert frequency and persistence durations,\par
+- ID churn rates,\par
+- DINO invocation rate versus precision outcomes,\par
+- depth validity rates in active scenes.\par
+\par
+\b 19. Risks, Constraints, and Technical Debt\b0\par
+Key constraints currently visible:\par
+- Multiple generations of scripts can reference differing path assumptions.\par
+- Output directories are partially distributed across module-local and project-global roots.\par
+- Some utilities remain environment-specific and may need portability hardening.\par
+- Class mappings can drift unless governed centrally.\par
+\par
+Technical debt opportunities:\par
+- Consolidate config into one central runtime config layer.\par
+- Standardize model registry and output naming conventions.\par
+- Add linted schema contracts for logs and DB tables.\par
+- Introduce end-to-end integration tests for critical safety flows.\par
+\par
+\b 20. Roadmap Recommendations\b0\par
+Near-term roadmap:\par
+1. Canonicalize class dictionary and migration metadata.\par
+2. Unify all run-time path configuration in a single source.\par
+3. Add policy configuration files for thresholds and gating rules.\par
+4. Build repeatable evaluation packs for corridor, ward, and OR scenes.\par
+5. Expand anomaly ontology beyond blocked exit and spillage into workflow and compliance events.\par
+\par
+Mid-term roadmap:\par
+1. Add service wrappers for deployment as streaming microservices.\par
+2. Add event bus integration for real-time alerts and acknowledgements.\par
+3. Add dashboard views over SQLite and CSV outputs.\par
+4. Introduce model and prompt version tracking as first-class metadata.\par
+\par
+\b 21. Detailed Script Responsibility Matrix\b0\par
+\b Training\b0\par
+- train_hospital.py: base merged training setup and phased optimization.\par
+- train_hospital_v3.py: class expansion and selective oversampling strategy.\par
+- phase2_retry.py and train_merged.py: alternate/repair training workflows.\par
+\par
+\b Data Preparation\b0\par
+- prepare_hospital_dataset.py: filtering, remapping, balancing.\par
+- split_and_rename_dataset.py: controlled split and dataset materialization.\par
+- download_new_dataset.py: data acquisition helper.\par
+\par
+\b Inference\b0\par
+- infer_v3.py: direct V3 inference and QA logs.\par
+- infer_ensemble.py: V1/V3 class-routed fusion.\par
+- infer_hospitalguard.py and infer_hospitalguard_v2.py: production-style multi-layer inference with fallback controls.\par
+- batch_test.py and batch_test_ensemble.py: structured batch evaluation.\par
+\par
+\b Temporal and RGB-D\b0\par
+- infer_hospitalguard_temporal.py: short-term tracking and egress-aware logic.\par
+- rgbd_spatial_twin.py: RGB-D replay, side-by-side visualization, DB writes.\par
+- rgbd_hospitalguard_temporal.py: temporal RGB-D fusion plus spatial persistence.\par
+- hospitalguard_temporal_core.py: shared temporal logic core.\par
+\par
+\b Safety and Anomaly\b0\par
+- door_zone_rgbd.py: 3D door-zone geometry construction and visualization.\par
+- Obstruction_detection.py: object-zone collision based blocked-exit decisioning.\par
+- RGBD_Reader.py: synchronized stream reading from bag data with robustness handling.\par
+\par
+\b Object Plausibility\b0\par
+- common_sense_filter.py: heuristic reality checks.\par
+- rgbd_3d_filter.py: physical size and floor-aware depth filtering.\par
+- hospital_object_dimensions_approx.yaml: metric priors for object dimensions.\par
+\par
+\b 22. Conclusion\b0\par
+The Cognitive Recognition Framework is a multi-layer hospital vision system engineered for practical safety intelligence, not merely benchmark detection. Its strongest differentiator is the integration of model ensemble logic, context-aware fallback inference, temporal persistence, RGB-D geometric validation, and explicit anomaly-rule execution with auditable outputs.\par
+\par
+The project demonstrates a clear progression toward deployment-grade behavior: stronger reliability controls, richer 3D reasoning, and operational evidence generation. With continued consolidation of configuration and evaluation standards, the framework is well-positioned for production-oriented hospital safety monitoring use cases.\par
+\par
+\b End of Report\b0\par
+}
