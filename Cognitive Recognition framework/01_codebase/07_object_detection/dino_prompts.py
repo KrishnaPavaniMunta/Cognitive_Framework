@@ -18,7 +18,7 @@ DINO_FALLBACK = {
     "hazmat_sign": ("hazard sign. caution. fire symbol. diamond shape. triangle shaped yellow warning. Danger.", 0.40),
     "utility_trolley": ("trolley with multiple shelves. stand with wheels. rolling cart with shelves and push handle. wheeled trolley.", 0.42),
     "oxygen_pump": ("upright oxygen concentrator machine. oxygen concentrator tower with front control panel, vents, wheels, and oxygen tubing. hospital oxygen concentrator unit plugged into wall.", 0.58),
-    "power_socket": ("electrical switchboard. electrical panel. distribution board. breaker panel. fuse box. electrical cabinet.", 0.20),
+    "switch_board": ("electrical switchboard. electrical panel. distribution board. breaker panel. fuse box. electrical cabinet.", 0.20),
     "iv_stand": ("hospital iv stand pole with wheeled base and hanging hooks. intravenous drip stand.", 0.48),
     "infusion_pump": ("infusion pump device mounted on iv pole with monitor and control buttons.", 0.50),
 }

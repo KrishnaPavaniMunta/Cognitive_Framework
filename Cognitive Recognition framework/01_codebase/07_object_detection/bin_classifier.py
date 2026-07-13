@@ -3,7 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-PRESERVE_CANONICAL_BIN_LABEL = True
+PRESERVE_CANONICAL_BIN_LABEL = False
 
 
 def _clip_box(frame, box_coords):
@@ -50,13 +50,14 @@ def classify_bin_type(frame, box_coords):
         return "general_bin"
 
     yellow_percentage = float(cv2.countNonZero(yellow_mask)) / crop_area
-    if yellow_percentage < 0.40:
+    print(f"[DEBUG] yellow_percentage = {yellow_percentage:.2f}")
+    if yellow_percentage < 0.10:
         return "general_bin"
 
     contours_info = cv2.findContours(black_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = contours_info[0] if len(contours_info) == 2 else contours_info[1]
     if not contours:
-        return "yellow_bin"
+        return "yellow_bin" if yellow_percentage > 0.40 else "general_bin"
 
     height, width = crop.shape[:2]
     min_stripe_area = max(12.0, crop_area * 0.0015)
@@ -80,9 +81,9 @@ def classify_bin_type(frame, box_coords):
             continue
 
         stripe_candidates.append((x, y, contour_width, contour_height, area, center_y))
-
+        print(f"[DEBUG] stripe_candidates found: {len(stripe_candidates)}")
     if not stripe_candidates:
-        return "yellow_bin"
+        return "yellow_bin" if yellow_percentage > 0.40 else "general_bin"
 
     mid_band_candidates = [item for item in stripe_candidates if height * 0.28 <= item[5] <= height * 0.82]
     combined_area = sum(item[4] for item in mid_band_candidates)
@@ -96,7 +97,7 @@ def classify_bin_type(frame, box_coords):
     if len(stripe_candidates) >= 3 and combined_area / crop_area >= 0.01:
         return "bin_tiger_stripe"
 
-    return "yellow_bin"
+    return "yellow_bin" if yellow_percentage > 0.40 else "general_bin"
 
 
 def refine_bin_detections(frame, detections):
