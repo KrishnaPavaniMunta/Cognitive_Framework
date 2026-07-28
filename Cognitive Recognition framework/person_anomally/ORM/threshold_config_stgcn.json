@@ -1,0 +1,23 @@
+{
+    "mean_error": 0.15433658984606155,
+    "std_error": 0.8884076190799257,
+    "max_normal_error": 15.655834197998047,
+    "threshold_multiplier": 5.0,
+    "anomaly_threshold": 4.59637468524569,
+    "num_joints": 17,
+    "time_frames": 30,
+    "in_features": 3,
+    "latent_dim": 64,
+    "gmm_anomaly_threshold": 19.582056045532227,
+    "gmm_mean_log_prob": 224.52027893066406,
+    "gmm_min_log_prob": -59.295799255371094,
+    "gmm_percentile": 0.5,
+    "spatial_gmm_threshold": -27.02645492553711,
+    "spatial_gmm_percentile": 1.0,
+    "best_val_loss": 0.14865954512996332,
+    "best_epoch": 35,
+    "mean_x": -0.1490345001220703,
+    "mean_y": -0.6278330087661743,
+    "std_x": 2.1676127910614014,
+    "std_y": 3.165893316268921
+}
