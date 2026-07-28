@@ -23,7 +23,8 @@ with zipfile.ZipFile(zip_path, "r") as z:
 for root, dirs, files in os.walk("etri_csv_data"):
     print(root, files[:5])
 
-!pip install pandas numpy scikit-learn tensorflow matplotlib seaborn -q
+import subprocess
+subprocess.run(["pip", "install", "pandas", "numpy", "scikit-learn", "tensorflow", "matplotlib", "seaborn", "-q"], check=True)
 
 """## Loading, normalization, and feature-engineering functions"""
 
@@ -196,7 +197,7 @@ print("X_norm shape:", X_norm.shape)
 
 N_CHUNKS_TO_USE = 14
 
-!cat /proc/meminfo | grep MemTotal
+subprocess.run(["bash", "-c", "cat /proc/meminfo | grep MemTotal"], check=False)
 
 import glob
 import numpy as np
