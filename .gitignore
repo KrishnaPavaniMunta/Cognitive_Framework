@@ -64,10 +64,17 @@ Log/
 *.mkv
 *.pptx
 
-# Reorganized Cognitive Recognition framework large assets
+# Reorganized Cognitive Recognition framework large assets and local-only content
 Cognitive Recognition framework/01_codebase/04_rgbd_and_spatial_twin/hospital_detector_longterm/Data/
 Cognitive Recognition framework/01_codebase/04_rgbd_and_spatial_twin/hospital_detector_longterm/rgbd_development/data/
 Cognitive Recognition framework/01_codebase/04_rgbd_and_spatial_twin/hospital_detector_longterm/rgbd_development/output/
 Cognitive Recognition framework/02_datasets/
+Cognitive Recognition framework/04_outputs_runs_and_logs/
+Cognitive Recognition framework/05_documents_and_presentations/
+Cognitive Recognition framework/06_database/
+Cognitive Recognition framework/07_environment_and_project_meta/
 Cognitive Recognition framework/08_media_and_3d_assets/
+Cognitive Recognition framework/09_misc/
+Cognitive Recognition framework/Testing Images/
+Cognitive Recognition framework/Testing Videos/
 slam_output.ply
