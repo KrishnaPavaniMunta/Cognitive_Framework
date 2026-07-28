@@ -1,0 +1,178 @@
+metadata:
+  title: Hospital Object Approximate Dimensions
+  units: meters
+  purpose: Reference sizes for RGB-D validation, false-positive filtering, and scene reasoning.
+  note: Values are approximate indoor hospital object sizes and should be tuned against site-specific camera data.
+
+objects:
+  door:
+    typical:
+      width: 1.0
+      height: 2.1
+      depth: 0.05
+    range:
+      width: [0.8, 1.4]
+      height: [1.9, 2.4]
+
+  exit_sign:
+    typical:
+      width: 0.35
+      height: 0.18
+      depth: 0.05
+    range:
+      width: [0.2, 0.45]
+      height: [0.1, 0.25]
+
+  small_bin:
+    typical:
+      width: 0.3
+      height: 0.4
+      depth: 0.3
+    range:
+      width: [0.25, 0.55]
+      height: [0.30, 0.65]
+
+  large_bin:
+    typical:
+      width: 0.7
+      height: 1.0
+      depth: 0.7
+    range:
+      width: [0.55, 0.90]
+      height: [0.75, 1.30]
+
+  oxygen_pump:
+    typical:
+      width: 0.35
+      height: 0.85
+      depth: 0.3
+    range:
+      width: [0.25, 0.5]
+      height: [0.55, 1.05]
+
+  oxygen_cylinder:
+    typical:
+      width: 0.18
+      height: 1.35
+      depth: 0.18
+    range:
+      width: [0.1, 0.25]
+      height: [0.8, 1.6]
+
+  wheelchair_manual:
+    typical:
+      width: 0.63
+      height: 0.92
+      depth: 0.95
+    range:
+      width: [0.55, 0.72]
+      height: [0.8, 1.05]
+
+  wheelchair_powered:
+    typical:
+      width: 0.7
+      height: 1.1
+      depth: 1.1
+    range:
+      width: [0.62, 0.9]
+      height: [0.95, 1.3]
+
+  security_camera_dome:
+    typical:
+      width: 0.15
+      height: 0.1
+      depth: 0.15
+    range:
+      width: [0.1, 0.22]
+      height: [0.06, 0.16]
+
+  security_camera_bullet:
+    typical:
+      width: 0.07
+      height: 0.08
+      depth: 0.22
+    range:
+      width: [0.04, 0.12]
+      height: [0.05, 0.14]
+
+  switch_board:
+    typical:
+      width: 0.22
+      height: 0.18
+      depth: 0.04
+    range:
+      width: [0.1, 0.5]
+      height: [0.1, 0.4]
+
+  surgical_light:
+    typical:
+      width: 0.75
+      height: 0.18
+      depth: 0.75
+    range:
+      width: [0.45, 1.2]
+      height: [0.08, 0.35]
+
+  hand_sanitizer:
+    typical:
+      width: 0.12
+      height: 0.25
+      depth: 0.1
+    range:
+      width: [0.06, 0.25]
+      height: [0.12, 0.45]
+
+  radiator:
+    typical:
+      width: 1.0
+      height: 0.6
+      depth: 0.12
+    range:
+      width: [0.4, 2.0]
+      height: [0.3, 1.0]
+
+
+  iv_stand:
+    typical:
+      width: 0.55
+      height: 1.8
+      depth: 0.55
+    range:
+      width: [0.35, 0.8]
+      height: [1.3, 2.0]
+
+  infusion_pump:
+    typical:
+      width: 0.18
+      height: 0.3
+      depth: 0.15
+    range:
+      width: [0.1, 0.35]
+      height: [0.18, 0.5]
+
+  glove:
+    typical:
+      width: 0.1
+      height: 0.24
+      depth: 0.02
+    range:
+      width: [0.07, 0.14]
+      height: [0.18, 0.3]
+
+  mask:
+    typical:
+      width: 0.18
+      height: 0.1
+      depth: 0.01
+    range:
+      width: [0.12, 0.24]
+      height: [0.07, 0.15]
+
+  hair_net:
+    typical:
+      width: 0.22
+      height: 0.22
+      depth: 0.05
+    range:
+      width: [0.16, 0.32]
+      height: [0.16, 0.32]
