@@ -95,7 +95,7 @@ objects:
       width: [0.04, 0.12]
       height: [0.05, 0.14]
 
-  switch_board:
+  power_socket:
     typical:
       width: 0.22
       height: 0.18
@@ -130,17 +130,6 @@ objects:
     range:
       width: [0.4, 2.0]
       height: [0.3, 1.0]
-
-
-  iv_stand:
-    typical:
-      width: 0.55
-      height: 1.8
-      depth: 0.55
-    range:
-      width: [0.35, 0.8]
-      height: [1.3, 2.0]
-
   infusion_pump:
     typical:
       width: 0.18
@@ -176,3 +165,30 @@ objects:
     range:
       width: [0.16, 0.32]
       height: [0.16, 0.32]
+
+  hospital_stretcher:
+    typical:
+      width: 2.0
+      height: 0.9
+      depth: 0.7
+    range:
+      width: [0.5, 2.4]   # Wide range to account for viewing from the side (2.4m) vs the front/back (0.5m)
+      height: [0.5, 1.3]  # Height of the bed platform and rails
+
+  knife:
+    typical:
+      width: 0.2
+      height: 0.05
+      depth: 0.02
+    range:
+      width: [0.1, 0.4]   # 10cm to 40cm long
+      height: [0.01, 0.15] # Lying flat, it will be very short vertically
+
+  iv_stand:
+    typical:
+      width: 0.6
+      height: 2.0
+      depth: 0.6
+    range:
+      width: [0.3, 0.8]   # Just the width of the wheeled base
+      height: [1.3, 2.5]  # IV poles are very tall and adjustable
