@@ -57,6 +57,9 @@ Log/
 # Optional notebook checkpoints
 .ipynb_checkpoints/
 
+# Local archive/backups
+Archived/
+
 # Large local media/docs often used for testing or reporting
 *.mp4
 *.mov
