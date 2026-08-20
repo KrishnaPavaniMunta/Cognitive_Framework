@@ -1,0 +1,1183 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://www.semanticweb.org/chevi/ontologies/2026/5/untitle/"
+     xml:base="http://www.semanticweb.org/chevi/ontologies/2026/5/untitle/"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:classes-ontology="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#"
+     xmlns:untitled-ontology-6="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#">
+    <owl:Ontology rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology"/>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Object Properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#causes -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#causes">
+        <rdfs:subPropertyOf rdf:resource="http://www.w3.org/2002/07/owl#topObjectProperty"/>
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#HazardEvent"/>
+        <rdfs:range rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hasObject -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hasObject">
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hasPredicate -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hasPredicate">
+        <rdfs:subPropertyOf rdf:resource="http://www.w3.org/2002/07/owl#topObjectProperty"/>
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement"/>
+        <rdfs:range rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Predicate"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hasSubject -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hasSubject">
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#isEvidenceFor -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#isEvidenceFor">
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement"/>
+        <rdfs:range rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#blocks -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#blocks">
+        <rdfs:domain>
+            <owl:Class>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Obstacle"/>
+                </owl:unionOf>
+            </owl:Class>
+        </rdfs:domain>
+        <rdfs:range>
+            <owl:Class>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure"/>
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment"/>
+                </owl:unionOf>
+            </owl:Class>
+        </rdfs:range>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#existsIn -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#existsIn">
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject"/>
+        <rdfs:range rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Context"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hasLocation -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hasLocation">
+        <rdfs:domain>
+            <owl:Class>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#HazardEvent"/>
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person"/>
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject"/>
+                </owl:unionOf>
+            </owl:Class>
+        </rdfs:domain>
+        <rdfs:range rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Location"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#involves -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#involves">
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Event"/>
+        <rdfs:range rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#isAt -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#isAt">
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role"/>
+        <rdfs:range rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Location"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#isDeterminedBy -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#isDeterminedBy">
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role"/>
+        <rdfs:range rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Context"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#playsRole -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#playsRole">
+        <rdfs:domain>
+            <owl:Class>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person"/>
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject"/>
+                </owl:unionOf>
+            </owl:Class>
+        </rdfs:domain>
+        <rdfs:range rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#threatens -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#threatens">
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+        <rdfs:range rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#triggersAlert -->
+
+    <owl:ObjectProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#triggersAlert">
+        <rdfs:domain>
+            <owl:Class>
+                <owl:unionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#HazardEvent"/>
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role"/>
+                </owl:unionOf>
+            </owl:Class>
+        </rdfs:domain>
+        <rdfs:range rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Alert"/>
+    </owl:ObjectProperty>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Data properties
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#detectedAt -->
+
+    <owl:DatatypeProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#detectedAt">
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#dateTime"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hasConfidence -->
+
+    <owl:DatatypeProperty rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hasConfidence">
+        <rdfs:domain rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#float"/>
+    </owl:DatatypeProperty>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Classes
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#ContaminationHazard -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#ContaminationHazard">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+                    <owl:Restriction>
+                        <owl:onProperty>
+                            <rdf:Description>
+                                <owl:inverseOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#causes"/>
+                            </rdf:Description>
+                        </owl:onProperty>
+                        <owl:someValuesFrom rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#spillage"/>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#FireHazard -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#FireHazard">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#blocks"/>
+                        <owl:someValuesFrom rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment"/>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Predicate -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Predicate"/>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement"/>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#TrippingHazard -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#TrippingHazard">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+                    <owl:Restriction>
+                        <owl:onProperty>
+                            <rdf:Description>
+                                <owl:inverseOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#playsRole"/>
+                            </rdf:Description>
+                        </owl:onProperty>
+                        <owl:someValuesFrom rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#oxygen_pump -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#oxygen_pump">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Typical dimensions ≈ 35 × 60 × 30 cm (portable concentrator)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#switchboard -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#switchboard">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure"/>
+        <rdfs:comment>Typical dimensions ≈ 60 × 80 × 20 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#utility_trolley -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#utility_trolley">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+        <rdfs:comment>Typical dimensions ≈ 50 × 95 × 80 cm (W × H × L)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Alert -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Alert">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Event"/>
+        <owl:disjointWith rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#HazardEvent"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Context -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Context"/>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Environment -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Environment">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Location"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#EnvironmentContext -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#EnvironmentContext">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Context"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Event -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Event"/>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role"/>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#threatens"/>
+                <owl:someValuesFrom rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#HazardEvent -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#HazardEvent">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Event"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#IndoorSpace -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#IndoorSpace">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Location"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Location -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Location"/>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MonitoredEntity -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MonitoredEntity">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Obstacle -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Obstacle">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role"/>
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#blocks"/>
+                <owl:someValuesFrom rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Patient -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Patient">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person"/>
+        <rdfs:comment>Typical dimensions ≈ 50 × 170 × 30 cm standing; ~200 cm lying</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person"/>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject"/>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role"/>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyZone -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyZone">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SpatialContext -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SpatialContext">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Context"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Staff -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Staff">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#TemporalContext -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#TemporalContext">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Context"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Visitor -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Visitor">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#backpack -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#backpack">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical dimensions ≈ 30 × 45 × 20 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bag -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bag">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical dimensions ≈ 35 × 40 × 15 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#baseball_glove -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#baseball_glove">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical dimensions ≈ 25 × 30 × 10 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bathroom_labels -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bathroom_labels">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure"/>
+        <rdfs:comment>Typical dimensions ≈ 15 × 15 × 0.5 cm (sign)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bed -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bed">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+        <rdfs:comment>Typical dimensions ≈ 140 × 60 × 200 cm (W × H × L)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bench -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bench">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+        <rdfs:comment>Typical dimensions ≈ 120 × 85 × 40 cm (W × H × D)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bench_hosp -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bench_hosp">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+        <rdfs:comment>Typical dimensions ≈ 150 × 85 × 45 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#book -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#book">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical dimensions ≈ 15 × 23 × 3 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bottle -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bottle">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical dimensions ≈ 7 cm diameter × 25 cm height</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#cabinet -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#cabinet">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+        <rdfs:comment>Typical dimensions ≈ 80 × 180 × 45 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#cell_phone -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#cell_phone">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical dimensions ≈ 7 × 15 × 0.8 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#chair -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#chair">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+        <rdfs:comment>Typical dimensions ≈ 45 × 90 × 45 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#clock -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#clock">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure"/>
+        <rdfs:comment>Typical dimensions ≈ 30 cm diameter × 5 cm depth (wall)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#couch -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#couch">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+        <rdfs:comment>Typical dimensions ≈ 180 × 85 × 90 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#cup -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#cup">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical dimensions ≈ 8 cm diameter × 10 cm height</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#dining_table -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#dining_table">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+        <rdfs:comment>Typical dimensions ≈ 120 × 75 × 80 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#door -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#door">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure"/>
+        <rdfs:comment>Typical dimensions ≈ 90 × 200 × 4 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#exit_sign -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#exit_sign">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment"/>
+        <rdfs:comment>Typical dimensions ≈ 30 × 15 × 5 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#fire_extinguisher -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#fire_extinguisher">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment"/>
+        <rdfs:comment>Typical dimensions ≈ 15 cm diameter × 50–70 cm height</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#fire_hydrant -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#fire_hydrant">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment"/>
+        <rdfs:comment>Typical dimensions ≈ 30 × 75 × 30 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#fork -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#fork">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical length ≈ 19 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#glove -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#glove">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment"/>
+        <rdfs:comment>Typical dimensions ≈ 10 × 24 cm (worn)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hair_net -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hair_net">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment"/>
+        <rdfs:comment>Typical dimensions ≈ 28 cm diameter (worn)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#handbag -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#handbag">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical dimensions ≈ 30 × 25 × 12 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#healthcare_worker -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#healthcare_worker">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Staff"/>
+        <rdfs:comment>Typical dimensions ≈ 50 × 170 × 30 cm (standing adult)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hospital_bed -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hospital_bed">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Typical dimensions ≈ 90 × 100 × 210 cm (W × H × L), height adjustable</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hospital_stretcher -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hospital_stretcher">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Typical dimensions ≈ 70 × 85 × 200 cm (W × H × L)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#infusion_pump -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#infusion_pump">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Typical dimensions ≈ 30 × 20 × 15 cm, pole-mounted</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#iv_bag -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#iv_bag">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Typical dimensions ≈ 15 × 30 cm (flexible), 0.5–1 L capacity</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#iv_stand -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#iv_stand">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Typical dimensions ≈ 60 cm base × 150–220 cm height</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#knife -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#knife">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical length ≈ 21 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#mask -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#mask">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment"/>
+        <rdfs:comment>Typical dimensions ≈ 17 × 9 cm (flat)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#monitor_hosp -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#monitor_hosp">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Typical dimensions ≈ 35 × 30 × 20 cm (bedside monitor)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#nasal_cannula -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#nasal_cannula">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Tubing ≈ 2 m length, nasal prongs ≈ 1 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#patient_monitor -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#patient_monitor">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Typical dimensions ≈ 35 × 30 × 20 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#person -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#person">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person"/>
+        <rdfs:comment>Typical dimensions ≈ 50 × 170 × 30 cm (shoulder W × standing H × D)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#radiator -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#radiator">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure"/>
+        <rdfs:comment>Typical dimensions ≈ 100 × 60 × 10 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#reception_counter -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#reception_counter">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+        <rdfs:comment>Typical dimensions ≈ 200 × 110 × 70 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#refrigerator -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#refrigerator">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure"/>
+        <rdfs:comment>Typical dimensions ≈ 60 × 170 × 65 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#scissors -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#scissors">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical length ≈ 15–20 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#security_camera -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#security_camera">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment"/>
+        <rdfs:comment>Typical dimensions ≈ 12 cm diameter (dome) or 10 × 10 × 15 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#sink -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#sink">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure"/>
+        <rdfs:comment>Typical dimensions ≈ 55 × 20 × 45 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#spillage -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#spillage">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#HazardEvent"/>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#spoon -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#spoon">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical length ≈ 18 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#suitcase -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#suitcase">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+        <rdfs:comment>Typical dimensions ≈ 45 × 65 × 25 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#surgical_light -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#surgical_light">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Dome ≈ 60–80 cm diameter, ceiling-mounted arm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#surgical_scissor -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#surgical_scissor">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Typical length ≈ 12–18 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#test_tube -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#test_tube">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Typical dimensions ≈ 1.5 cm diameter × 10–15 cm height</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#toilet -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#toilet">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure"/>
+        <rdfs:comment>Typical dimensions ≈ 40 × 40 × 65 cm (W × H × D)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#vending_machines -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#vending_machines">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+        <rdfs:comment>Typical dimensions ≈ 90 × 180 × 80 cm</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#wheelchair -->
+
+    <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#wheelchair">
+        <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+        <rdfs:comment>Typical dimensions ≈ 65 × 90 × 105 cm (W × H × L)</rdfs:comment>
+    </owl:Class>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Individuals
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#alert_42 -->
+
+    <owl:NamedIndividual rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#alert_42">
+        <rdf:type rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Alert"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#bag_07 -->
+
+    <owl:NamedIndividual rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#bag_07">
+        <rdf:type rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bag"/>
+        <untitled-ontology-6:existsIn rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#ctx_night"/>
+        <untitled-ontology-6:playsRole rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hazard_abandoned"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#ctx_night -->
+
+    <owl:NamedIndividual rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#ctx_night">
+        <rdf:type rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#TemporalContext"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#floor_corridorB -->
+
+    <owl:NamedIndividual rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#floor_corridorB">
+        <rdf:type rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#IndoorSpace"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hazard_abandoned -->
+
+    <owl:NamedIndividual rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hazard_abandoned">
+        <rdf:type rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+        <untitled-ontology-6:isDeterminedBy rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#ctx_night"/>
+        <untitled-ontology-6:threatens rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#nurse_anna"/>
+        <untitled-ontology-6:triggersAlert rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#alert_42"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hazard_contamination -->
+
+    <owl:NamedIndividual rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hazard_contamination">
+        <rdf:type rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+        <untitled-ontology-6:isAt rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#floor_corridorB"/>
+        <untitled-ontology-6:isDeterminedBy rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#ctx_night"/>
+        <untitled-ontology-6:threatens rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#nurse_anna"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#location -->
+
+    <owl:NamedIndividual rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#location">
+        <rdf:type rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Predicate"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#nurse_anna -->
+
+    <owl:NamedIndividual rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#nurse_anna">
+        <rdf:type rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Staff"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#spillage_01 -->
+
+    <owl:NamedIndividual rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#spillage_01">
+        <rdf:type rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#spillage"/>
+        <classes-ontology:causes rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hazard_contamination"/>
+        <untitled-ontology-6:hasLocation rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#floor_corridorB"/>
+        <untitled-ontology-6:triggersAlert rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#alert_42"/>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#statement_01 -->
+
+    <owl:NamedIndividual rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#statement_01">
+        <rdf:type rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement"/>
+        <classes-ontology:hasObject rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#floor_corridorB"/>
+        <classes-ontology:hasPredicate rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#location"/>
+        <classes-ontology:hasSubject rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#bag_07"/>
+        <classes-ontology:isEvidenceFor rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hazard_abandoned"/>
+        <classes-ontology:detectedAt rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2026-05-14T23:04:00</classes-ontology:detectedAt>
+        <classes-ontology:hasConfidence rdf:datatype="http://www.w3.org/2001/XMLSchema#float">0.92</classes-ontology:hasConfidence>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#statement_02 -->
+
+    <owl:NamedIndividual rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#statement_02">
+        <rdf:type rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement"/>
+        <classes-ontology:hasObject rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#floor_corridorB"/>
+        <classes-ontology:hasPredicate rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#location"/>
+        <classes-ontology:hasSubject rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#spillage_01"/>
+        <classes-ontology:isEvidenceFor rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#hazard_contamination"/>
+        <classes-ontology:detectedAt rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2026-05-14T23:10:00</classes-ontology:detectedAt>
+        <classes-ontology:hasConfidence rdf:datatype="http://www.w3.org/2001/XMLSchema#float">0.87</classes-ontology:hasConfidence>
+    </owl:NamedIndividual>
+    
+
+
+    <!-- 
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //
+    // General axioms
+    //
+    ///////////////////////////////////////////////////////////////////////////////////////
+     -->
+
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointClasses"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#ContaminationHazard"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#FireHazard"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#TrippingHazard"/>
+        </owl:members>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointClasses"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Predicate"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Context"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Event"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Location"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role"/>
+        </owl:members>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointClasses"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#EnvironmentContext"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SpatialContext"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#TemporalContext"/>
+        </owl:members>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointClasses"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment"/>
+        </owl:members>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointClasses"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MonitoredEntity"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Obstacle"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyZone"/>
+        </owl:members>
+    </rdf:Description>
+    <rdf:Description>
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointClasses"/>
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Patient"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Staff"/>
+            <rdf:Description rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Visitor"/>
+        </owl:members>
+    </rdf:Description>
+</rdf:RDF>
+
+
+
+<!-- Generated by the OWL API (version 4.5.29.2024-05-13T12:11:03Z) https://github.com/owlcs/owlapi -->
+
