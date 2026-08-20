@@ -1,0 +1,48 @@
+1. Activate + sanity check (imports the detector module and the bag reader)
+
+cd "d:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework"
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\Activate.ps1"
+python "01_codebase\08_semantic_map\build_semantic_map_from_bag.py" --help
+
+2. Short smoke run — no detector cost wasted, tells you if TF/odom exists in the bag
+
+python "01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
+  --bag "02_datasets\saxon\hallway 1" `
+  --max-frames 30 --verbose
+
+3. Full run once the smoke run looks right
+
+python "01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
+  --bag "02_datasets\saxon\hallway 1" `
+  --frame-stride 3 --merge-radius-m 0.5 --verbose
+
+
+
+v2 
+
+# From the project root
+cd "D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework"
+
+# Run the full semantic map + Rerun 3D recording.
+# Person is excluded by default.
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
+  ".\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
+  --bag ".\02_datasets\saxon\rgbd_clean_20260521_142555" `
+  --frame-stride 3 `
+  --rerun `
+  --rerun-cloud-stride 10 `
+  --rerun-cloud-every 10
+
+For a live Rerun window while it processes, add --rerun-spawn:
+
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
+  ".\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
+  --bag ".\02_datasets\saxon\rgbd_clean_20260521_142555" `
+  --frame-stride 3 --rerun --rerun-spawn `
+  --rerun-cloud-stride 10 --rerun-cloud-every 10
+
+
+Open the completed scene:
+
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\rerun.exe" `
+  ".\04_outputs_runs_and_logs\outputs\semantic_maps\semanticmap_rgbd_clean_20260521_142555_20260819T090335\semantic_map.rrd"

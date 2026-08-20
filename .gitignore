@@ -9,6 +9,7 @@ __pycache__/
 .venv-gpu*/
 venv/
 env/
+Cognitive Recognition framework/astra_env_311/
 
 # IDE/editor files
 .vscode/
