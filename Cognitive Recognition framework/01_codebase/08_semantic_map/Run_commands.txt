@@ -45,4 +45,4 @@ For a live Rerun window while it processes, add --rerun-spawn:
 Open the completed scene:
 
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\rerun.exe" `
-  ".\04_outputs_runs_and_logs\outputs\semantic_maps\semanticmap_rgbd_clean_20260521_142555_20260819T090335\semantic_map.rrd"
+  ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.rrd"
