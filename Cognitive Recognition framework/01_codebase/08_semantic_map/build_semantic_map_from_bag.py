@@ -680,6 +680,10 @@ def main() -> None:
     if args.rerun:
         from rerun_logger import RerunSceneLogger
 
+        if rrd_path.exists():
+            archive_path = history_dir / f"world_map_{run_id}.rrd"
+            rrd_path.replace(archive_path)
+            LOG.info("[RERUN] Preserved previous recording at %s", archive_path)
         scene = RerunSceneLogger(
             rrd_path,
             application_id=f"semantic_map/{safe_label}",

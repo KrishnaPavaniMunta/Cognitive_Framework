@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from rdflib import BNode, Graph, Literal, Namespace, RDF, RDFS, URIRef
@@ -96,12 +97,59 @@ def _hierarchy(graph: Graph, class_uri: URIRef) -> list[dict[str, str]]:
 def _dimensions(graph: Graph, class_uri: URIRef) -> dict:
     annotation = graph.value(class_uri, CO.physicalDimensions)
     if annotation is None:
-        return {}
+        return _comment_dimensions(graph, class_uri)
     try:
         value = json.loads(str(annotation))
     except (TypeError, ValueError, json.JSONDecodeError):
         return {"raw": str(annotation)}
-    return value if isinstance(value, dict) else {"raw": value}
+    if not isinstance(value, dict):
+        return {}
+
+    typical = value.get("typical", {})
+    ranges = value.get("range", {})
+    dimensions = {}
+    for axis in ("width", "depth", "height"):
+        dimensions[axis] = typical.get(axis)
+        axis_range = ranges.get(axis, [])
+        dimensions[f"min_{axis}"] = axis_range[0] if len(axis_range) == 2 else None
+        dimensions[f"max_{axis}"] = axis_range[1] if len(axis_range) == 2 else None
+    return dimensions
+
+
+def _comment_dimensions(graph: Graph, class_uri: URIRef) -> dict:
+    comments = " ".join(str(value) for value in graph.objects(class_uri, RDFS.comment))
+    match = re.search(r"(?:dimensions|size).*?([0-9]+(?:\.[0-9]+)?)\s*[x×]\s*"
+                      r"([0-9]+(?:\.[0-9]+)?)\s*[x×]\s*([0-9]+(?:\.[0-9]+)?)\s*cm",
+                      comments, re.IGNORECASE)
+    if not match:
+        return {}
+
+    numbers = [float(number) / 100.0 for number in match.groups()]
+    descriptor = comments[match.end():]
+    if re.search(r"W\s*[×x]\s*H\s*[×x]\s*(?:L|D)", descriptor, re.IGNORECASE):
+        width, height, depth = numbers
+    else:
+        width, depth, height = numbers
+    return {
+        "width": width,
+        "depth": depth,
+        "height": height,
+        "min_width": None,
+        "max_width": None,
+        "min_depth": None,
+        "max_depth": None,
+        "min_height": None,
+        "max_height": None,
+    }
+
+
+def _property_value(graph: Graph, predicate: URIRef, value: object) -> object:
+    if predicate == CO.physicalDimensions:
+        return None
+    if isinstance(value, Literal):
+        python_value = value.toPython()
+        return python_value if isinstance(python_value, (str, int, float, bool)) else str(value)
+    return _display_term(graph, value)
 
 
 class OntologyKnowledgeBase:
@@ -130,20 +178,31 @@ class OntologyKnowledgeBase:
         properties = [
             {
                 "predicate": local_name(predicate),
-                "predicate_uri": str(predicate),
-                "value": _display_term(self.graph, value),
+                "value": property_value,
             }
             for predicate, value in self.graph.predicate_objects(class_uri)
+            for property_value in [_property_value(self.graph, predicate, value)]
+            if property_value is not None
         ]
-        properties.sort(key=lambda item: (item["predicate_uri"], item["value"]))
+        dimensions = _dimensions(self.graph, class_uri)
+        properties.extend(
+            {
+                "predicate": f"{key}M",
+                "value": value,
+            }
+            for key, value in dimensions.items()
+            if value is not None
+        )
+        properties.sort(key=lambda item: (item["predicate"], str(item["value"])))
 
         record = {
             "map_class": class_name,
+            "object_type": local_name(class_uri).replace("_", " ").title(),
             "resolved_name": local_name(class_uri),
             "uri": str(class_uri),
             "resolution": resolution,
             "hierarchy": _hierarchy(self.graph, class_uri),
-            "dimensions": _dimensions(self.graph, class_uri),
+            "dimensions": dimensions,
             "comments": sorted(str(value) for value in self.graph.objects(class_uri, RDFS.comment)),
             "properties": properties,
         }

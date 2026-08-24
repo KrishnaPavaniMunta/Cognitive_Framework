@@ -330,6 +330,7 @@
 
     <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#utility_trolley">
         <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
+        <classes-ontology:physicalDimensions>{"typical":{"width":0.5,"depth":0.8,"height":0.95},"range":{}}</classes-ontology:physicalDimensions>
         <rdfs:comment>Typical dimensions ≈ 50 × 95 × 80 cm (W × H × L)</rdfs:comment>
     </owl:Class>
     

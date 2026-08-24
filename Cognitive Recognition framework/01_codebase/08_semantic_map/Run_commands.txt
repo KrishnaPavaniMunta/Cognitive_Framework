@@ -49,6 +49,12 @@ $env:Path = (Resolve-Path ".\07_environment_and_project_meta\.venv-gpu311\Script
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\rerun.exe" `
   ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.rrd"
 
+# Open the current recording together with every preserved previous Rerun run.
+# Each new run updates world_map.db and archives the previous .rrd under run_history.
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\rerun.exe" `
+  (Get-ChildItem ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\run_history\world_map_*.rrd" | Select-Object -ExpandProperty FullName) `
+  ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.rrd"
+
 
 # Optional: inject ontology metadata into the Rerun window already open on port 9876.
 # Run this in a second PowerShell terminal after opening world_map.rrd.

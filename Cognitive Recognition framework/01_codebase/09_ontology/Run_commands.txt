@@ -1,0 +1,47 @@
+# Ontology and semantic-map commands
+# Run these from the project root unless noted otherwise.
+
+cd "D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework"
+
+# 1. Check the ontology resolver and representative classes.
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
+  -c "import sys; sys.path.insert(0, r'.\01_codebase\09_ontology'); from ontology_knowledge import OntologyKnowledgeBase; kb=OntologyKnowledgeBase(); print('triples=', len(kb.graph)); [print(name, kb.resolve(name)['resolution'], kb.resolve(name)['dimensions']) for name in ('door', 'utility_trolley', 'power_socket', 'general_bin', 'medical_tray', 'not_a_real_class')]"
+
+# 2. Export the persistent SQLite semantic map to populated RDF.
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
+  ".\01_codebase\09_ontology\semantic_map_to_rdf.py" `
+  --db ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.db" `
+  --out ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\semantic_map.rdf"
+
+# 3. Open the ontology-enriched interactive HTML semantic-map inspector.
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
+  ".\01_codebase\08_semantic_map\view_semantic_map.py" `
+  --db ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.db" `
+  --html
+
+# Add --no-open when the HTML should only be generated.
+# Add --html-out ".\path\to\viewer.html" to choose another output path.
+
+# 4. Open the complete Rerun recording.
+$env:Path = (Resolve-Path ".\07_environment_and_project_meta\.venv-gpu311\Scripts").Path + ";" + $env:Path
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\rerun.exe" `
+  ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.rrd"
+
+# 5. Open current and preserved previous Rerun recordings together.
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\rerun.exe" `
+  (Get-ChildItem ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\run_history\world_map_*.rrd" | Select-Object -ExpandProperty FullName) `
+  ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.rrd"
+
+# 6. Rebuild the complete Rerun recording from the bag without rerunning detection.
+# Existing SQLite landmarks are retained; the previous .rrd is archived in run_history.
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
+  ".\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
+  --bag ".\02_datasets\saxon\rgbd_clean_20260521_142555" `
+  --rerun --rerun-only --no-preview --no-video `
+  --frame-stride 3 `
+  --rerun-cloud-stride 10 `
+  --rerun-cloud-every 10
+
+# 7. Run the focused ontology/viewer tests.
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
+  -m unittest ".\10_Testing\test_ontology_semantic_map_viewer.py" -v

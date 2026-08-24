@@ -42,6 +42,11 @@ class OntologyKnowledgeTests(unittest.TestCase):
         self.assertEqual(fallback["resolution"], "fallback")
         self.assertEqual(fallback["resolved_name"], "PhysicalObject")
 
+        trolley = self.knowledge_base.resolve("utility_trolley")
+        self.assertEqual(trolley["dimensions"]["width"], 0.5)
+        self.assertEqual(trolley["dimensions"]["depth"], 0.8)
+        self.assertEqual(trolley["dimensions"]["height"], 0.95)
+
 
 class SemanticMapViewerTests(unittest.TestCase):
     def test_database_discovery_supports_current_and_legacy_layouts(self) -> None:
@@ -93,6 +98,8 @@ class SemanticMapViewerTests(unittest.TestCase):
             payload = json.loads(figure.data[0].customdata[0][0])
             self.assertEqual(payload["map"]["Landmark ID"], 7)
             self.assertEqual(payload["ontology"]["uri"], landmark["ontology"]["uri"])
+            self.assertEqual(payload["map"]["Instance ID"], 2)
+            self.assertNotIn("predicate_uri", payload["ontology"]["properties"][0])
 
             html_path = write_html(figure, root / "viewer.html", "<map source>")
             html = html_path.read_text(encoding="utf-8")

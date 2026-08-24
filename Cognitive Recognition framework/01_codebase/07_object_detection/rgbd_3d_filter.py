@@ -59,8 +59,17 @@ def load_dimensions_config(dimensions_config_path: str | Path) -> dict[str, dict
                     "min_h": float(height_range[0]),
                     "max_h": float(height_range[1]),
                 }
+                typical = spec.get("typical", {})
+                depth_range = range_spec.get("depth", [])
+                values.update({
+                    "width": float(typical["width"]) if "width" in typical else 0.0,
+                    "depth": float(typical["depth"]) if "depth" in typical else 0.0,
+                    "height": float(typical["height"]) if "height" in typical else 0.0,
+                    "min_d": float(depth_range[0]) if len(depth_range) == 2 else 0.0,
+                    "max_d": float(depth_range[1]) if len(depth_range) == 2 else 0.0,
+                })
 
-        if len(values) != len(DIMENSION_TAGS):
+        if not all(key in values for key in ("min_w", "max_w", "min_h", "max_h")):
             continue
 
         class_name = class_uri.rsplit("#", 1)[-1]

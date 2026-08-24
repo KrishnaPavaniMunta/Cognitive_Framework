@@ -18,16 +18,12 @@ def _landmark_payload(landmark: dict) -> dict:
     return {
         "map": {
             "Class": landmark["class_name"],
-            "Instance ID": landmark["instance_id"],
-            "Landmark ID": landmark["landmark_id"],
-            "Hit count": landmark["hit_count"],
-            "Mean confidence": landmark["mean_confidence"],
-            "Max confidence": landmark["max_confidence"],
+            "Instance ID": int(landmark["instance_id"]),
+            "Landmark ID": int(landmark["landmark_id"]),
             "World frame": landmark["world_frame"],
             "X (m)": landmark["X"],
             "Y (m)": landmark["Y"],
             "Z (m)": landmark["Z"],
-            "First observed": landmark.get("first_seen") or landmark.get("first_seen_ns"),
             "Last observed": landmark.get("last_seen") or landmark.get("last_seen_ns"),
         },
         "ontology": landmark["ontology"],
@@ -169,20 +165,30 @@ plot.on("plotly_click", event => {
   const knowledge = payload.ontology;
   document.getElementById("empty").style.display = "none";
   document.getElementById("heading").textContent = `${payload.map.Class} ${payload.map["Instance ID"]}`;
-  const mapRows = Object.entries(payload.map).map(([key, value]) => [key, typeof value === "number" ? Number(value).toFixed(key.includes("confidence") ? 3 : 4) : value]);
+    const mapRows = Object.entries(payload.map).map(([key, value]) => [key, typeof value === "number" && !key.includes("ID") ? Number(value).toFixed(4) : value]);
   const classRows = [
-    ["Resolved class", knowledge.resolved_name],
-    ["Resolution", knowledge.resolution],
-    ["URI", knowledge.uri]
+        ["Object type", knowledge.object_type],
+        ["Allowed in this space", "UNKNOWN"]
   ];
-  const hierarchy = knowledge.hierarchy.length ? `<ul>${knowledge.hierarchy.map(item => `<li>${esc(item.name)}<div class="uri">${esc(item.uri)}</div></li>`).join("")}</ul>` : `<div class="uri">No named superclass assertions</div>`;
-  const comments = knowledge.comments.length ? `<ul>${knowledge.comments.map(comment => `<li>${esc(comment)}</li>`).join("")}</ul>` : `<div class="uri">No comments asserted</div>`;
-  const properties = knowledge.properties.length ? table(knowledge.properties.map(item => [item.predicate, item.value])) : `<div class="uri">No direct properties asserted</div>`;
+    const hierarchy = knowledge.hierarchy.length ? `<ul>${knowledge.hierarchy.map(item => `<li>${esc(item.name)}</li>`).join("")}</ul>` : `<div class="uri">No named superclass assertions</div>`;
+    const comments = knowledge.comments.length ? `<ul>${knowledge.comments.map(comment => `<li>${esc(comment)}</li>`).join("")}</ul>` : `<div class="uri">No comments asserted</div>`;
+    const dimensions = [
+        ["Width (m)", knowledge.dimensions.width],
+        ["Depth (m)", knowledge.dimensions.depth],
+        ["Height (m)", knowledge.dimensions.height],
+        ["Min width (m)", knowledge.dimensions.min_width],
+        ["Max width (m)", knowledge.dimensions.max_width],
+        ["Min depth (m)", knowledge.dimensions.min_depth],
+        ["Max depth (m)", knowledge.dimensions.max_depth],
+        ["Min height (m)", knowledge.dimensions.min_height],
+        ["Max height (m)", knowledge.dimensions.max_height]
+    ].map(([key, value]) => [key, value == null ? "Not defined" : Number(value).toFixed(3)]);
+    const properties = knowledge.properties.length ? table(knowledge.properties.map(item => [item.predicate, typeof item.value === "number" ? Number(item.value).toFixed(3) : item.value])) : `<div class="uri">No direct properties asserted</div>`;
   document.getElementById("content").innerHTML =
     section("Map Evidence", table(mapRows)) +
-    section("Ontology Class", `<div class="status ${knowledge.resolution === "fallback" ? "fallback" : ""}">${esc(knowledge.resolution)}</div>${table(classRows)}`) +
+        section("Ontology Class", table([["Object class", knowledge.map_class], ...classRows])) +
     section("Hierarchy", hierarchy) +
-    section("Physical Dimensions", Object.keys(knowledge.dimensions).length ? table(flatten(knowledge.dimensions)) : `<div class="uri">No structured dimensions asserted</div>`) +
+        section("Physical Dimensions", table(dimensions)) +
     section("Comments", comments) +
     section("RDF Properties", properties);
 });
