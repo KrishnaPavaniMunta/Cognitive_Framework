@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 import numpy as np
-import yaml
 
 
 _dimensions_config_cache: dict[str, dict[str, dict[str, float]]] = {}
+
+RDF_ABOUT = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about"
+DIMENSION_NAMESPACE = "http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#"
+PHYSICAL_DIMENSIONS_TAG = f"{{{DIMENSION_NAMESPACE}}}physicalDimensions"
+DIMENSION_TAGS = {
+    "min_w": f"{{{DIMENSION_NAMESPACE}}}hasMinWidthM",
+    "max_w": f"{{{DIMENSION_NAMESPACE}}}hasMaxWidthM",
+    "min_h": f"{{{DIMENSION_NAMESPACE}}}hasMinHeightM",
+    "max_h": f"{{{DIMENSION_NAMESPACE}}}hasMaxHeightM",
+}
 
 
 def load_dimensions_config(dimensions_config_path: str | Path) -> dict[str, dict[str, float]]:
@@ -16,35 +27,50 @@ def load_dimensions_config(dimensions_config_path: str | Path) -> dict[str, dict
 
     config_path = Path(dimensions_config_path)
     if not config_path.exists():
-        raise FileNotFoundError(f"Dimensions config not found: {config_path}")
+        raise FileNotFoundError(f"Ontology not found: {config_path}")
 
-    with config_path.open("r", encoding="utf-8") as handle:
-        raw_config = yaml.safe_load(handle) or {}
-
-    objects = raw_config.get("objects")
-    if not isinstance(objects, dict):
-        raise ValueError(f"Invalid dimensions config format in {config_path}: missing 'objects' mapping")
+    try:
+        root = ET.parse(config_path).getroot()
+    except ET.ParseError as exc:
+        raise ValueError(f"Invalid RDF/XML ontology in {config_path}: {exc}") from exc
 
     parsed: dict[str, dict[str, float]] = {}
-    for class_name, spec in objects.items():
-        if not isinstance(spec, dict):
+    for element in root.iter():
+        class_uri = element.attrib.get(RDF_ABOUT)
+        if not class_uri:
             continue
 
-        range_spec = spec.get("range") or {}
-        width_range = range_spec.get("width")
-        height_range = range_spec.get("height")
-        if not width_range or not height_range or len(width_range) != 2 or len(height_range) != 2:
+        values: dict[str, float] = {}
+        for key, tag in DIMENSION_TAGS.items():
+            node = element.find(tag)
+            if node is not None and node.text is not None:
+                values[key] = float(node.text)
+
+        annotation = element.find(PHYSICAL_DIMENSIONS_TAG)
+        if annotation is not None and annotation.text:
+            spec = json.loads(annotation.text)
+            range_spec = spec.get("range", {})
+            width_range = range_spec.get("width", [])
+            height_range = range_spec.get("height", [])
+            if len(width_range) == 2 and len(height_range) == 2:
+                values = {
+                    "min_w": float(width_range[0]),
+                    "max_w": float(width_range[1]),
+                    "min_h": float(height_range[0]),
+                    "max_h": float(height_range[1]),
+                }
+
+        if len(values) != len(DIMENSION_TAGS):
             continue
 
-        parsed[str(class_name)] = {
-            "min_w": float(width_range[0]),
-            "max_w": float(width_range[1]),
-            "min_h": float(height_range[0]),
-            "max_h": float(height_range[1]),
-        }
+        class_name = class_uri.rsplit("#", 1)[-1]
+        parsed[class_name] = values
+
+    if not parsed:
+        raise ValueError(f"No structured physical-size annotations found in ontology: {config_path}")
 
     _dimensions_config_cache[cache_key] = parsed
-    print(f"[DEPTH FILTER] Loaded physical-size limits for {len(parsed)} classes from {config_path.name}")
+    print(f"[DEPTH FILTER] Loaded ontology size limits for {len(parsed)} classes from {config_path.name}")
     return parsed
 
 

@@ -25,8 +25,10 @@ import math
 import sqlite3
 from pathlib import Path
 
-from rdflib import Graph, Literal, Namespace, RDF, RDFS, URIRef
-from rdflib.namespace import OWL, XSD
+from rdflib import Graph, Literal, RDF, RDFS
+from rdflib.namespace import XSD
+
+from ontology_knowledge import BR, CO, UO, add_extension_classes, resolve_class
 
 BASE_DIR = Path(__file__).resolve().parent
 CODEBASE_DIR = BASE_DIR.parent
@@ -34,25 +36,6 @@ PROJECT_ROOT = CODEBASE_DIR.parent
 
 DEFAULT_ONTOLOGY = BASE_DIR / "ontology.rdf"
 DEFAULT_MAPS_ROOT = PROJECT_ROOT / "04_outputs_runs_and_logs" / "outputs" / "semantic_maps"
-
-CO = Namespace("http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#")
-UO = Namespace("http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#")
-BR = Namespace("http://www.semanticweb.org/chevi/ontologies/2026/5/semantic-map-bridge#")
-
-# Detector class_name -> ontology local class name, for names that don't match 1:1.
-CLASS_ALIASES = {
-    "power_socket": "switchboard",
-    "general_bin": "waste_bin",
-    "yellow_bin": "waste_bin",
-    "bin_tiger_stripe": "waste_bin",
-    "patient": "Patient",
-}
-
-# Classes not present in ontology.rdf, added into the populated graph as small bridge extensions.
-EXTENSION_CLASSES = {
-    "medical_tray": ("MedicalDevice", "Steel/plastic instrument tray (semantic-map-bridge extension class)."),
-    "waste_bin": ("Infrastructure", "General/yellow/tiger-stripe hospital waste bin (semantic-map-bridge extension class)."),
-}
 
 # Heuristic seed for the ontology's Obstacle/blocks reasoning (not a substitute for an OWL reasoner).
 OBSTACLE_CLASSES = {"utility_trolley", "wheelchair", "suitcase", "bag", "backpack", "handbag", "waste_bin", "cabinet"}
@@ -63,29 +46,12 @@ def _sanitize(text: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in str(text))
 
 
-def add_extension_classes(graph: Graph) -> None:
-    for local_name, (super_local, comment) in EXTENSION_CLASSES.items():
-        cls_uri = BR[local_name]
-        graph.add((cls_uri, RDF.type, OWL.Class))
-        graph.add((cls_uri, RDFS.subClassOf, UO[super_local]))
-        graph.add((cls_uri, RDFS.comment, Literal(comment)))
-
-
-def resolve_class(graph: Graph, class_name: str) -> URIRef:
-    """Map a detector class_name to an ontology (or bridge extension) class URI."""
-    local_name = CLASS_ALIASES.get(class_name, class_name)
-    for namespace in (CO, UO, BR):
-        candidate = namespace[local_name]
-        if (candidate, RDF.type, OWL.Class) in graph:
-            return candidate
-    print(f"[semantic_map_to_rdf] no ontology class for '{class_name}', falling back to PhysicalObject")
-    return UO.PhysicalObject
-
-
 def find_latest_db(maps_root: Path) -> Path:
-    candidates = sorted(maps_root.glob("*/semantic_map.db"), key=lambda p: p.stat().st_mtime)
+    candidates = list(maps_root.glob("*/world_map.db"))
+    candidates.extend(maps_root.glob("semanticmap_*/semantic_map.db"))
+    candidates.sort(key=lambda p: p.stat().st_mtime)
     if not candidates:
-        raise FileNotFoundError(f"No semantic_map.db found under {maps_root}")
+        raise FileNotFoundError(f"No world_map.db or semantic_map.db found under {maps_root}")
     return candidates[-1]
 
 
@@ -203,7 +169,7 @@ def build_graph(ontology_path: Path, db_path: Path, block_radius_m: float) -> Gr
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--db", type=Path, default=None, help="Path to a semantic_map.db (default: newest run).")
+    parser.add_argument("--db", type=Path, default=None, help="Path to a world_map.db or semantic_map.db (default: newest map).")
     parser.add_argument("--ontology", type=Path, default=DEFAULT_ONTOLOGY, help="Path to the base ontology.rdf.")
     parser.add_argument("--out", type=Path, default=None, help="Output RDF file (default: alongside --db).")
     parser.add_argument("--format", choices=["turtle", "xml"], default="turtle", help="Output serialization.")

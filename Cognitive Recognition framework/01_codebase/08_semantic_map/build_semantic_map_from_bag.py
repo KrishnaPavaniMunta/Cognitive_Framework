@@ -41,11 +41,16 @@ BASE_DIR = Path(__file__).resolve().parent
 CODEBASE_DIR = BASE_DIR.parent
 PROJECT_ROOT = CODEBASE_DIR.parent
 OBJECT_DETECTION_DIR = CODEBASE_DIR / "07_object_detection"
+ONTOLOGY_DIR = CODEBASE_DIR / "09_ontology"
+DEFAULT_ONTOLOGY = ONTOLOGY_DIR / "ontology.rdf"
 
 if str(OBJECT_DETECTION_DIR) not in sys.path:
     sys.path.insert(0, str(OBJECT_DETECTION_DIR))
+if str(ONTOLOGY_DIR) not in sys.path:
+    sys.path.insert(0, str(ONTOLOGY_DIR))
 
 import rosbag_rgbd_sim_capture as capture  # noqa: E402  (path bootstrap must run first)
+from ontology_knowledge import OntologyKnowledgeBase  # noqa: E402
 from tf_tree import TFTree, normalize_frame  # noqa: E402
 
 DEFAULT_OUT_ROOT = PROJECT_ROOT / "04_outputs_runs_and_logs" / "outputs" / "semantic_maps"
@@ -484,6 +489,8 @@ def parse_args() -> argparse.Namespace:
                    help="Use raw depth instead of edge-preserving bilateral smoothing")
     p.add_argument("--rerun-only", action="store_true",
                    help="Replay RGB-D and TF into world_map.rrd without running object detection")
+    p.add_argument("--ontology", default=str(DEFAULT_ONTOLOGY),
+                   help="RDF/OWL ontology embedded as landmark metadata in Rerun")
     p.add_argument("--verbose", action="store_true", help="Print DEBUG lines to the console too")
     return p.parse_args()
 
@@ -519,7 +526,7 @@ def build_detector(args: argparse.Namespace) -> capture.YoloEnsembleDinoDetector
 
 
 def build_size_lookup():
-    """Nominal (width, height) in metres per class, from the detector's dimensions YAML."""
+    """Nominal (width, height) in metres per class, from the ontology."""
     try:
         from rgbd_3d_filter import load_dimensions_config
 
@@ -924,6 +931,13 @@ def main() -> None:
     finally:
         db.flush_landmarks()
         if scene is not None:
+            knowledge_base = OntologyKnowledgeBase(Path(args.ontology).resolve())
+            knowledge_by_class = {
+                class_name: knowledge_base.resolve(class_name)
+                for class_name in {landmark["class_name"] for landmark in db.landmarks.values()}
+            }
+            for landmark in db.landmarks.values():
+                landmark["ontology"] = knowledge_by_class[landmark["class_name"]]
             scene.log_landmarks(db.landmarks, size_lookup=build_size_lookup())
             scene.finish()
             LOG.info("[RERUN] Scene written: %d cloud chunks, %d points, %d trajectory poses",

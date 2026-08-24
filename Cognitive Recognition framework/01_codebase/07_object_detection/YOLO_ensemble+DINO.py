@@ -29,7 +29,7 @@ V2_PATH = Path(r"D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition
 V3_PATH = Path(r"D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework\03_models_and_weights\models\yolo_trained_v3.pt")
 OUT_DIR = Path(r"D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework\04_outputs_runs_and_logs\OD_Outputs")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-DIMENSIONS_CONFIG_PATH = BASE_DIR / "hospital_object_dimensions_approx.yaml"
+DIMENSIONS_CONFIG_PATH = PROJECT_ROOT / "01_codebase" / "09_ontology" / "ontology.rdf"
 
 # ── Hyperparameters ────────────────────────────────────────────────────────────
 DEFAULT_CONF_THRESH = 0.25

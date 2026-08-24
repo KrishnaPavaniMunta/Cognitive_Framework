@@ -16,6 +16,8 @@ Entity layout:
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 import cv2
@@ -64,6 +66,73 @@ def matrix_to_translation_quaternion(matrix) -> tuple[list[float], list[float]]:
 def class_color(class_name: str) -> list[int]:
     h = abs(hash(class_name))
     return [80 + (h & 0x7F), 80 + ((h >> 8) & 0x7F), 80 + ((h >> 16) & 0x7F)]
+
+
+def stable_landmark_path(landmark: dict, landmark_id: int | None = None) -> str:
+    class_slug = re.sub(r"[^a-z0-9_-]+", "_", str(landmark["class_name"]).lower()).strip("_") or "unknown"
+    resolved_id = landmark.get("landmark_id", landmark_id)
+    if resolved_id is None:
+        raise ValueError("A landmark_id is required for a stable Rerun entity path")
+    return f"world/landmarks/{class_slug}_{int(resolved_id)}"
+
+
+def landmark_metadata(landmark: dict, landmark_id: int | None = None) -> dict:
+    ontology = landmark.get("ontology") or {}
+    hierarchy = ontology.get("hierarchy") or []
+    hierarchy_names = [item.get("name", "") if isinstance(item, dict) else str(item) for item in hierarchy]
+    mean_confidence = landmark.get("mean_confidence")
+    if mean_confidence is None and landmark.get("conf_sum") is not None:
+        mean_confidence = landmark["conf_sum"] / max(1, landmark.get("hit_count", 1))
+
+    values = {
+        "landmark_id": landmark.get("landmark_id", landmark_id),
+        "map_class": landmark["class_name"],
+        "instance_id": landmark.get("instance_id"),
+        "world_frame": landmark.get("world_frame"),
+        "hit_count": landmark.get("hit_count"),
+        "mean_confidence": mean_confidence,
+        "max_confidence": landmark.get("max_confidence"),
+        "first_observed": landmark.get("first_seen") or landmark.get("first_seen_ns"),
+        "last_observed": landmark.get("last_seen") or landmark.get("last_seen_ns"),
+        "ontology_resolution": ontology.get("resolution"),
+        "ontology_class": ontology.get("resolved_name"),
+        "ontology_uri": ontology.get("uri"),
+        "ontology_hierarchy": " > ".join(hierarchy_names),
+        "ontology_dimensions_json": json.dumps(ontology.get("dimensions") or {}, sort_keys=True),
+        "ontology_comments": "\n".join(ontology.get("comments") or []),
+        "ontology_properties_json": json.dumps(ontology.get("properties") or [], sort_keys=True),
+    }
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def log_landmark_entities(landmarks, size_lookup=None) -> None:
+    items = landmarks.items() if isinstance(landmarks, dict) else (
+        (landmark.get("landmark_id"), landmark) for landmark in landmarks
+    )
+    for landmark_id, landmark in items:
+        center = np.asarray([[landmark["X"], landmark["Y"], landmark["Z"]]], dtype=np.float32)
+        label = f"{landmark['class_name']} {landmark['instance_id']}"
+        color = [class_color(landmark["class_name"])]
+        extent = size_lookup(landmark["class_name"]) if size_lookup else None
+        if extent is None:
+            half_size = [[DEFAULT_BOX_HALF_SIZE_M] * 3]
+        else:
+            width_m, height_m = extent
+            half_size = [[width_m / 2.0, width_m / 2.0, height_m / 2.0]]
+
+        rr.log(
+            stable_landmark_path(landmark, landmark_id),
+            rr.Points3D(center, colors=color, labels=[label], radii=0.06),
+            rr.Boxes3D(
+                centers=center,
+                half_sizes=np.asarray(half_size, dtype=np.float32),
+                labels=[label],
+                colors=color,
+                fill_mode="TransparentFillMajorWireframe",
+            ),
+            rr.AnyValues(**landmark_metadata(landmark, landmark_id)),
+            static=True,
+        )
 
 
 class RerunSceneLogger:
@@ -166,36 +235,7 @@ class RerunSceneLogger:
         """Static labelled points and boxes; call once the map is final."""
         if not landmarks:
             return
-
-        centers, half_sizes, labels, colors = [], [], [], []
-        for lid, lm in landmarks.items():
-            centers.append([lm["X"], lm["Y"], lm["Z"]])
-            labels.append(f"{lm['class_name']} {lm['instance_id']}")
-            colors.append(class_color(lm["class_name"]))
-
-            extent = size_lookup(lm["class_name"]) if size_lookup else None
-            if extent is None:
-                half_sizes.append([DEFAULT_BOX_HALF_SIZE_M] * 3)
-            else:
-                width_m, height_m = extent
-                half_sizes.append([width_m / 2.0, width_m / 2.0, height_m / 2.0])
-
-        rr.log(
-            "world/landmarks",
-            rr.Points3D(np.asarray(centers, dtype=np.float32), colors=colors, labels=labels, radii=0.06),
-            static=True,
-        )
-        rr.log(
-            "world/landmarks/boxes",
-            rr.Boxes3D(
-                centers=np.asarray(centers, dtype=np.float32),
-                half_sizes=np.asarray(half_sizes, dtype=np.float32),
-                labels=labels,
-                colors=colors,
-                fill_mode="TransparentFillMajorWireframe",
-            ),
-            static=True,
-        )
+        log_landmark_entities(landmarks, size_lookup=size_lookup)
 
     def finish(self) -> None:
         if len(self.trajectory) >= 2:

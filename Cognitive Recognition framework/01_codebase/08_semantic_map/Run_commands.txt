@@ -42,7 +42,15 @@ For a live Rerun window while it processes, add --rerun-spawn:
   --rerun-cloud-stride 10 --rerun-cloud-every 10
 
 
-Open the completed scene:
+Open the completed full scene with RGB-D cloud, trajectory, labels, and boxes:
+
+$env:Path = (Resolve-Path ".\07_environment_and_project_meta\.venv-gpu311\Scripts").Path + ";" + $env:Path
 
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\rerun.exe" `
   ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.rrd"
+
+
+# Optional: inject ontology metadata into the Rerun window already open on port 9876.
+# Run this in a second PowerShell terminal after opening world_map.rrd.
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
+  -c "import sys,sqlite3,rerun as rr; from pathlib import Path; sys.path[:0]=[r'01_codebase/08_semantic_map',r'01_codebase/09_ontology']; import view_semantic_map as v; from rerun_logger import log_landmark_entities; db=Path(r'04_outputs_runs_and_logs/outputs/semantic_maps/rgbd_clean_20260521_142555/world_map.db'); con=sqlite3.connect(db); landmarks=v.load_landmarks(con,1,None); con.close(); v.attach_ontology_knowledge(landmarks,v.OntologyKnowledgeBase()); rr.init('ontology_overlay',spawn=False); rr.connect_grpc('rerun+http://127.0.0.1:9876/proxy'); log_landmark_entities(landmarks); print(f'Injected ontology metadata for {len(landmarks)} landmarks')"

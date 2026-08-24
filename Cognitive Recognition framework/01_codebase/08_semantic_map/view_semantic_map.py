@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+import sys
+import webbrowser
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -23,27 +25,57 @@ from matplotlib import colormaps
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent.parent
 DEFAULT_OUT_ROOT = PROJECT_ROOT / "04_outputs_runs_and_logs" / "outputs" / "semantic_maps"
+ONTOLOGY_DIR = PROJECT_ROOT / "01_codebase" / "09_ontology"
+DEFAULT_ONTOLOGY = ONTOLOGY_DIR / "ontology.rdf"
+
+if str(ONTOLOGY_DIR) not in sys.path:
+    sys.path.insert(0, str(ONTOLOGY_DIR))
+
+from ontology_knowledge import OntologyKnowledgeBase  # noqa: E402
 
 
 def find_latest_db(out_root: Path) -> Path:
-    candidates = sorted(out_root.glob("semanticmap_*/semantic_map.db"),
-                        key=lambda p: p.stat().st_mtime, reverse=True)
+    candidates = list(out_root.glob("*/world_map.db"))
+    candidates.extend(out_root.glob("semanticmap_*/semantic_map.db"))
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     if not candidates:
-        raise FileNotFoundError(f"No semantic_map.db found under {out_root}")
+        raise FileNotFoundError(f"No world_map.db or semantic_map.db found under {out_root}")
     return candidates[0]
 
 
 def load_landmarks(conn: sqlite3.Connection, min_hits: int, classes: set[str] | None) -> list[dict]:
+    available = {row[1] for row in conn.execute("PRAGMA table_info(semantic_map)")}
+    required = ["landmark_id", "class_name", "world_frame", "X", "Y", "Z", "hit_count", "mean_confidence"]
+    optional = ["instance_id", "max_confidence", "first_seen_ns", "last_seen_ns", "first_seen", "last_seen"]
+    selected = required + [column for column in optional if column in available]
     rows = conn.execute(
-        "SELECT landmark_id, class_name, instance_id, world_frame, X, Y, Z, hit_count, mean_confidence "
-        "FROM semantic_map WHERE hit_count >= ? ORDER BY class_name",
+        f"SELECT {', '.join(selected)} FROM semantic_map WHERE hit_count >= ? ORDER BY class_name, landmark_id",
         (int(min_hits),),
     ).fetchall()
-    keys = ("landmark_id", "class_name", "instance_id", "world_frame", "X", "Y", "Z", "hit_count", "mean_confidence")
-    landmarks = [dict(zip(keys, r)) for r in rows]
+    landmarks = [dict(zip(selected, row)) for row in rows]
+
+    class_counts: dict[str, int] = {}
+    for landmark in landmarks:
+        class_name = landmark["class_name"]
+        class_counts[class_name] = class_counts.get(class_name, 0) + 1
+        landmark.setdefault("instance_id", class_counts[class_name])
+        landmark.setdefault("max_confidence", landmark["mean_confidence"])
+        landmark.setdefault("first_seen_ns", None)
+        landmark.setdefault("last_seen_ns", None)
+        landmark.setdefault("first_seen", "")
+        landmark.setdefault("last_seen", "")
     if classes:
         landmarks = [lm for lm in landmarks if lm["class_name"] in classes]
     return landmarks
+
+
+def attach_ontology_knowledge(landmarks: list[dict], knowledge_base: OntologyKnowledgeBase) -> None:
+    knowledge_by_class = {
+        class_name: knowledge_base.resolve(class_name)
+        for class_name in {landmark["class_name"] for landmark in landmarks}
+    }
+    for landmark in landmarks:
+        landmark["ontology"] = knowledge_by_class[landmark["class_name"]]
 
 
 def load_observations(conn: sqlite3.Connection, classes: set[str] | None) -> list[dict]:
@@ -133,22 +165,11 @@ def render_rerun(landmarks: list[dict], observations: list[dict],
                  trajectory: list[tuple[float, float, float]], application_id: str) -> None:
     import numpy as np
     import rerun as rr
-    from rerun_logger import class_color
+    from rerun_logger import class_color, log_landmark_entities
 
     rr.init(application_id, spawn=True)
     rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
-
-    centers = np.asarray([[lm["X"], lm["Y"], lm["Z"]] for lm in landmarks], dtype=np.float32)
-    labels = [f"{lm['class_name']} {lm['instance_id']}" for lm in landmarks]
-    colors = [class_color(lm["class_name"]) for lm in landmarks]
-
-    rr.log("world/landmarks", rr.Points3D(centers, colors=colors, labels=labels, radii=0.08), static=True)
-    rr.log(
-        "world/landmarks/boxes",
-        rr.Boxes3D(centers=centers, half_sizes=np.full_like(centers, 0.25),
-                   labels=labels, colors=colors, fill_mode="TransparentFillMajorWireframe"),
-        static=True,
-    )
+    log_landmark_entities(landmarks)
 
     if observations:
         pts = np.asarray([[o["X"], o["Y"], o["Z"]] for o in observations], dtype=np.float32)
@@ -170,9 +191,21 @@ def main() -> None:
     p.add_argument("--min-hits", type=int, default=1, help="Hide landmarks seen fewer than N times")
     p.add_argument("--classes", default="", help="Comma-separated class whitelist")
     p.add_argument("--observations", action="store_true", help="Also plot raw per-frame observations")
-    p.add_argument("--rerun", action="store_true", help="Open in the Rerun 3D viewer instead of matplotlib")
+    viewer = p.add_mutually_exclusive_group()
+    viewer.add_argument("--rerun", action="store_true", help="Open in the Rerun 3D viewer instead of matplotlib")
+    viewer.add_argument("--html", action="store_true", help="Write an interactive Plotly ontology viewer")
+    p.add_argument("--html-out", default="", help="Output path for --html (default: beside the database)")
+    p.add_argument("--no-open", action="store_true", help="Do not open the generated HTML in a browser")
+    p.add_argument("--ontology", default=str(DEFAULT_ONTOLOGY), help="RDF/OWL ontology used by HTML and Rerun")
     p.add_argument("--save", default="", help="Write the figure to this PNG path (matplotlib only)")
     args = p.parse_args()
+
+    if args.html_out and not args.html:
+        p.error("--html-out requires --html")
+    if args.no_open and not args.html:
+        p.error("--no-open requires --html")
+    if args.save and (args.html or args.rerun):
+        p.error("--save is only available with the default matplotlib viewer")
 
     db_path = Path(args.db).resolve() if args.db else find_latest_db(Path(args.out_root).resolve())
     if not db_path.exists():
@@ -184,7 +217,7 @@ def main() -> None:
     try:
         landmarks = load_landmarks(conn, args.min_hits, classes)
         observations = load_observations(conn, classes) if args.observations else []
-        trajectory = load_camera_poses(conn) if args.rerun else []
+        trajectory = load_camera_poses(conn) if args.rerun or args.html else []
     finally:
         conn.close()
 
@@ -197,6 +230,20 @@ def main() -> None:
     for lm in landmarks:
         print(f"  {lm['class_name']:<20} {lm['instance_id']:<3} "
               f"({lm['X']:7.3f}, {lm['Y']:7.3f}, {lm['Z']:7.3f})  hits={lm['hit_count']}")
+
+    if args.html or args.rerun:
+        attach_ontology_knowledge(landmarks, OntologyKnowledgeBase(Path(args.ontology).resolve()))
+
+    if args.html:
+        from semantic_map_html import build_figure, write_html
+
+        output_path = Path(args.html_out).resolve() if args.html_out else db_path.parent / "semantic_map_ontology.html"
+        title = f"{db_path.parent.name} | ontology semantic map"
+        written_path = write_html(build_figure(landmarks, trajectory, title), output_path, str(db_path))
+        print(f"Saved: {written_path}")
+        if not args.no_open:
+            webbrowser.open(written_path.as_uri())
+        return
 
     if args.rerun:
         render_rerun(landmarks, observations, trajectory, f"semantic_map/{db_path.parent.name}")

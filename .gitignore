@@ -78,7 +78,8 @@ Cognitive Recognition framework/05_documents_and_presentations/
 Cognitive Recognition framework/06_database/
 Cognitive Recognition framework/07_environment_and_project_meta/
 Cognitive Recognition framework/08_media_and_3d_assets/
-Cognitive Recognition framework/09_misc/
+Cognitive Recognition framework/09_misc/*
+!Cognitive Recognition framework/09_misc/hospital_object_dimensions_approx.yaml
 Cognitive Recognition framework/Testing Images/
 Cognitive Recognition framework/Testing Videos/
 slam_output.ply
