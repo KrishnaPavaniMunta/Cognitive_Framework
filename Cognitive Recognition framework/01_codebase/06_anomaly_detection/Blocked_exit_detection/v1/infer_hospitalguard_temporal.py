@@ -81,7 +81,7 @@ except Exception as _sam_import_err:
 # ── Paths ──────────────────────────────────────────────────────────────────────
 BASE_DIR   = Path(__file__).parent.resolve()
 ROOT_DIR   = BASE_DIR.parent
-REPO_ROOT  = BASE_DIR.parents[2]  # Cognitive Recognition framework/
+REPO_ROOT  = BASE_DIR.parents[3]  # Cognitive Recognition framework/
 V1_PATH    = REPO_ROOT / "03_models_and_weights/models/yolo_trained_v1.pt"
 V3_PATH    = REPO_ROOT / "03_models_and_weights/models/yolo_trained_v3.pt"
 OUT_DIR    = REPO_ROOT / "04_outputs_runs_and_logs/AD_Rules_Outputs"

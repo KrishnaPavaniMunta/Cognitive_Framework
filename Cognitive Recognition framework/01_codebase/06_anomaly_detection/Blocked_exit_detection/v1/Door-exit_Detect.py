@@ -28,7 +28,7 @@ from ultralytics import YOLO
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent.resolve()
-REPO_ROOT = BASE_DIR.parents[2]
+REPO_ROOT = BASE_DIR.parents[3]
 
 YOLO_MODEL_PATH = REPO_ROOT / "03_models_and_weights/models/yolo26m.pt"
 SAM_CKPT_PATH   = BASE_DIR / "sam_masker" / "sam_vit_h_4b8939.pth"

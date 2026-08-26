@@ -29,7 +29,7 @@ import numpy as np
 
 # Local modules in the same folder.
 BASE_DIR = Path(__file__).parent.resolve()
-REPO_ROOT = BASE_DIR.parents[2]
+REPO_ROOT = BASE_DIR.parents[3]
 OUT_DIR = REPO_ROOT / "04_outputs_runs_and_logs/AD_Rules_Outputs"
 sys.path.insert(0, str(BASE_DIR))
 
