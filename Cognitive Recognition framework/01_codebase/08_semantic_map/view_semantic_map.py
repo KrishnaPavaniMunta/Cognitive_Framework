@@ -27,6 +27,8 @@ PROJECT_ROOT = BASE_DIR.parent.parent
 DEFAULT_OUT_ROOT = PROJECT_ROOT / "04_outputs_runs_and_logs" / "outputs" / "semantic_maps"
 ONTOLOGY_DIR = PROJECT_ROOT / "01_codebase" / "09_ontology"
 DEFAULT_ONTOLOGY = ONTOLOGY_DIR / "ontology.rdf"
+CURRENT_HTML_NAME = "semantic_map_ontology.html"
+LEGACY_HTML_NAME = "semantic_map_ontology_viewer.html"
 
 if str(ONTOLOGY_DIR) not in sys.path:
     sys.path.insert(0, str(ONTOLOGY_DIR))
@@ -76,6 +78,28 @@ def attach_ontology_knowledge(landmarks: list[dict], knowledge_base: OntologyKno
     }
     for landmark in landmarks:
         landmark["ontology"] = knowledge_by_class[landmark["class_name"]]
+
+
+def refresh_semantic_map_html(db_path: Path, ontology_path: Path = DEFAULT_ONTOLOGY) -> Path:
+    """Overwrite the one current HTML snapshot from the persistent map database."""
+    from semantic_map_html import build_figure, write_html
+
+    conn = sqlite3.connect(db_path)
+    try:
+        landmarks = load_landmarks(conn, 1, None)
+        trajectory = load_camera_poses(conn)
+    finally:
+        conn.close()
+    attach_ontology_knowledge(landmarks, OntologyKnowledgeBase(ontology_path.resolve()))
+    output_path = write_html(
+        build_figure(landmarks, trajectory, f"{db_path.parent.name} | ontology semantic map"),
+        db_path.parent / CURRENT_HTML_NAME,
+        str(db_path),
+    )
+    legacy_path = db_path.parent / LEGACY_HTML_NAME
+    if legacy_path.exists():
+        legacy_path.unlink()
+    return output_path
 
 
 def load_observations(conn: sqlite3.Connection, classes: set[str] | None) -> list[dict]:
@@ -235,11 +259,16 @@ def main() -> None:
         attach_ontology_knowledge(landmarks, OntologyKnowledgeBase(Path(args.ontology).resolve()))
 
     if args.html:
-        from semantic_map_html import build_figure, write_html
+        written_path = (
+            Path(args.html_out).resolve()
+            if args.html_out
+            else refresh_semantic_map_html(db_path, Path(args.ontology).resolve())
+        )
+        if args.html_out:
+            from semantic_map_html import build_figure, write_html
 
-        output_path = Path(args.html_out).resolve() if args.html_out else db_path.parent / "semantic_map_ontology.html"
-        title = f"{db_path.parent.name} | ontology semantic map"
-        written_path = write_html(build_figure(landmarks, trajectory, title), output_path, str(db_path))
+            title = f"{db_path.parent.name} | ontology semantic map"
+            written_path = write_html(build_figure(landmarks, trajectory, title), written_path, str(db_path))
         print(f"Saved: {written_path}")
         if not args.no_open:
             webbrowser.open(written_path.as_uri())

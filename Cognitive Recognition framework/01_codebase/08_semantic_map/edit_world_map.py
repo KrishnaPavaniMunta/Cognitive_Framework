@@ -132,6 +132,30 @@ def rebuild_rerun(map_dir: Path, conn: sqlite3.Connection) -> None:
     subprocess.run(command, check=True)
 
 
+def refresh_current_outputs(map_dir: Path) -> None:
+    from view_semantic_map import refresh_semantic_map_html
+
+    html_path = refresh_semantic_map_html(map_dir / "world_map.db")
+    print(f"Updated HTML map: {html_path}")
+
+    try:
+        import rerun as rr
+        from ontology_knowledge import OntologyKnowledgeBase
+        from rerun_logger import log_landmark_entities
+        from view_semantic_map import attach_ontology_knowledge, load_landmarks
+
+        with sqlite3.connect(map_dir / "world_map.db") as conn:
+            landmarks = load_landmarks(conn, 1, None)
+        attach_ontology_knowledge(landmarks, OntologyKnowledgeBase())
+        rr.init(f"semantic_map/{map_dir.name}", spawn=False)
+        rr.connect_grpc("rerun+http://127.0.0.1:9876/proxy")
+        rr.log("world/landmarks", rr.Clear(recursive=True), static=True)
+        log_landmark_entities(landmarks)
+        print(f"Published {len(landmarks)} current landmarks to the live Rerun viewer.")
+    except Exception as exc:
+        print(f"Live Rerun was not updated ({exc}). The current HTML map is still updated.")
+
+
 def delete_landmark(conn: sqlite3.Connection, class_name: str, instance_id: int) -> bool:
     row = conn.execute(
         "SELECT landmark_id FROM semantic_map WHERE class_name=? AND instance_id=?",
@@ -205,6 +229,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Interactively delete false positives from one bag world map.")
     parser.add_argument("--map-dir", default="", help="Bag map folder containing world_map.db")
     parser.add_argument("--out-root", default=str(DEFAULT_OUT_ROOT))
+    parser.add_argument("--rebuild-rerun", action="store_true",
+                        help="Explicitly export a new full world_map.rrd snapshot after editing")
     args = parser.parse_args()
 
     map_dir = Path(args.map_dir).resolve() if args.map_dir else choose_map(Path(args.out_root).resolve())
@@ -251,9 +277,14 @@ def main() -> None:
             if delete_landmark(conn, class_name, instance_id):
                 print(f"Deleted '{class_name} {instance_id}'.")
 
-        rebuild_rerun(map_dir, conn)
+        refresh_current_outputs(map_dir)
+        if args.rebuild_rerun:
+            rebuild_rerun(map_dir, conn)
         print(f"\nUpdated database: {db_path}")
-        print(f"Updated Rerun map: {map_dir / 'world_map.rrd'}")
+        if args.rebuild_rerun:
+            print(f"Updated Rerun snapshot: {map_dir / 'world_map.rrd'}")
+        else:
+            print("Rerun snapshot unchanged; use --rebuild-rerun to export a new .rrd file.")
     finally:
         conn.close()
 

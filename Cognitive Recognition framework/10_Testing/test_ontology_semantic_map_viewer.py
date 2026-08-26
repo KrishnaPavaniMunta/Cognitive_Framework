@@ -18,7 +18,14 @@ for module_dir in (SEMANTIC_MAP_DIR, ONTOLOGY_DIR):
 from ontology_knowledge import OntologyKnowledgeBase
 from rerun_logger import landmark_metadata, stable_landmark_path
 from semantic_map_html import build_figure, write_html
-from view_semantic_map import attach_ontology_knowledge, find_latest_db, load_landmarks
+from view_semantic_map import (
+    CURRENT_HTML_NAME,
+    LEGACY_HTML_NAME,
+    attach_ontology_knowledge,
+    find_latest_db,
+    load_landmarks,
+    refresh_semantic_map_html,
+)
 
 
 class OntologyKnowledgeTests(unittest.TestCase):
@@ -46,6 +53,20 @@ class OntologyKnowledgeTests(unittest.TestCase):
         self.assertEqual(trolley["dimensions"]["width"], 0.5)
         self.assertEqual(trolley["dimensions"]["depth"], 0.8)
         self.assertEqual(trolley["dimensions"]["height"], 0.95)
+
+        expected = {
+            "fork": (0.03, 0.18, 0.01, 0.02, 0.05, 0.15, 0.22),
+            "spoon": (0.04, 0.18, 0.01, 0.03, 0.06, 0.15, 0.22),
+            "scissors": (0.06, 0.20, 0.01, 0.05, 0.09, 0.15, 0.25),
+            "surgical_scissor": (0.05, 0.16, 0.01, 0.04, 0.08, 0.12, 0.23),
+            "nasal_cannula": (0.15, 0.15, 0.05, 0.05, 0.25, 0.05, 0.25),
+        }
+        for class_name, values in expected.items():
+            dimensions = self.knowledge_base.resolve(class_name)["dimensions"]
+            self.assertEqual(
+                tuple(dimensions[key] for key in ("width", "height", "depth", "min_width", "max_width", "min_height", "max_height")),
+                values,
+            )
 
 
 class SemanticMapViewerTests(unittest.TestCase):
@@ -107,6 +128,36 @@ class SemanticMapViewerTests(unittest.TestCase):
             self.assertIn("Physical Dimensions", html)
             self.assertIn("&lt;map source&gt;", html)
             self.assertIn("const esc =", html)
+
+    def test_current_html_refresh_uses_one_fixed_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            database = root / "world_map.db"
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    """
+                    CREATE TABLE semantic_map (
+                        landmark_id INTEGER, class_name TEXT, instance_id INTEGER,
+                        world_frame TEXT, X REAL, Y REAL, Z REAL, hit_count INTEGER,
+                        mean_confidence REAL, max_confidence REAL, first_seen_ns INTEGER,
+                        last_seen_ns INTEGER, first_seen TEXT, last_seen TEXT
+                    )
+                    """
+                )
+                connection.execute(
+                    "INSERT INTO semantic_map VALUES (1, 'door', 1, 'odom', 1, 2, 0.4, 5, 0.8, 0.9, 10, 20, 'first', 'last')"
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            legacy_path = root / LEGACY_HTML_NAME
+            legacy_path.write_text("old viewer", encoding="utf-8")
+            output_path = refresh_semantic_map_html(database, ONTOLOGY_DIR / "ontology.rdf")
+            self.assertEqual(output_path.name, CURRENT_HTML_NAME)
+            self.assertTrue(output_path.exists())
+            self.assertFalse(legacy_path.exists())
 
     def test_rerun_path_sanitizes_class_name(self) -> None:
         landmark = {"landmark_id": 3, "class_name": "Power Socket/Test"}

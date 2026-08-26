@@ -23,7 +23,9 @@ v2
 # From the project root
 cd "D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework"
 
-# Run the full semantic map + Rerun 3D recording.
+# Run the full semantic map. This incrementally updates world_map.db and
+# overwrites the one current semantic_map_ontology.html viewer.
+# Add --rerun only when an explicit full RRD snapshot is required.
 # Person is excluded by default.
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
   ".\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `

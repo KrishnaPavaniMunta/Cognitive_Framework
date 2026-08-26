@@ -474,8 +474,8 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--no-preview", action="store_true", help="Disable the live OpenCV preview window")
     p.add_argument("--no-video", action="store_true", help="Do not record preview.mp4")
-    p.add_argument("--rerun", action="store_true", default=True,
-                   help="Refresh the persistent world_map.rrd (enabled by default)")
+    p.add_argument("--rerun", action="store_true",
+                   help="Export a new full world_map.rrd snapshot")
     p.add_argument("--no-rerun", action="store_false", dest="rerun",
                    help="Skip Rerun generation for this run")
     p.add_argument("--rerun-spawn", action="store_true", help="Open the Rerun viewer live while processing")
@@ -492,7 +492,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ontology", default=str(DEFAULT_ONTOLOGY),
                    help="RDF/OWL ontology embedded as landmark metadata in Rerun")
     p.add_argument("--verbose", action="store_true", help="Print DEBUG lines to the console too")
-    return p.parse_args()
+    args = p.parse_args()
+    if args.rerun_only:
+        args.rerun = True
+    return args
 
 
 def build_detector(args: argparse.Namespace) -> capture.YoloEnsembleDinoDetector:
@@ -907,7 +910,7 @@ def main() -> None:
                                    normalize_frame(camera_frame_id), extrinsics_status, pose_matrix)
                 if scene is not None:
                     scene.log_frame(processed_counter, rgb_item.timestamp_ns,
-                                    rgb_img, depth_mm, intr, pose_matrix)
+                                    rgb_img, depth_mm, intr, pose_matrix, detections=pins)
 
             annotated = annotate(rgb_img, processed_counter, rgb_item.timestamp_ns,
                                  pins, len(db.landmarks), extrinsics_status)
@@ -949,6 +952,11 @@ def main() -> None:
         if writer is not None:
             writer.release()
         cv2.destroyAllWindows()
+
+    from view_semantic_map import refresh_semantic_map_html
+
+    html_path = refresh_semantic_map_html(db_path, Path(args.ontology).resolve())
+    LOG.info("[HTML ] Current semantic-map viewer written: %s", html_path)
 
     # ── Report ────────────────────────────────────────────────────────────────
     LOG.info("=" * 78)
@@ -1010,6 +1018,7 @@ def main() -> None:
     LOG.info("History  : %s", history_dir / f"{run_id}.json")
     if args.rerun:
         LOG.info("Rerun    : %s", rrd_path)
+    LOG.info("HTML     : %s", html_path)
     if not args.no_video:
         LOG.info("Preview  : %s", video_path)
 

@@ -175,6 +175,7 @@ class RerunSceneLogger:
         depth_mm: np.ndarray,
         intrinsics,
         pose_matrix,
+        detections: list[dict] | None = None,
     ) -> None:
         self._set_time(frame_index, timestamp_ns)
 
@@ -189,6 +190,21 @@ class RerunSceneLogger:
         )
         rr.log("world/camera/image", rr.Pinhole(image_from_camera=k, resolution=[width, height]))
         rr.log("world/camera/image", rr.Image(cv2.cvtColor(rgb_bgr, cv2.COLOR_BGR2RGB)))
+
+        annotated_rgb = rgb_bgr.copy()
+        for detection in detections or []:
+            x1, y1, x2, y2 = (int(round(value)) for value in detection["bbox_xyxy"])
+            if x2 <= x1 or y2 <= y1:
+                continue
+            class_name = str(detection["class_name"])
+            confidence = float(detection.get("confidence") or 0.0)
+            color = tuple(int(channel) for channel in class_color(class_name))
+            label = f"{class_name} {confidence:.0%}"
+            cv2.rectangle(annotated_rgb, (x1, y1), (x2, y2), color, 2)
+            text_y = y1 - 7 if y1 >= 22 else y1 + 18
+            cv2.putText(annotated_rgb, label, (x1, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, color, 2, cv2.LINE_AA)
+        rr.log("world/camera/annotated_image", rr.Image(cv2.cvtColor(annotated_rgb, cv2.COLOR_BGR2RGB)))
 
         if frame_index % self.cloud_every_n_frames == 0:
             self._log_cloud(rgb_bgr, depth_mm, intrinsics, pose_matrix)
