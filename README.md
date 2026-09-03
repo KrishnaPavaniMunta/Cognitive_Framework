@@ -4,6 +4,8 @@ Computer-vision and spatial-reasoning software for surveillance of hospital envi
 
 The framework is intended for a mobile robot carrying an RGB-D camera. A recorded ROS 2 bag can be replayed offline, or the same processing stages can be adapted to an online sensor stream.
 
+Unless a command explicitly changes directory, run commands from the repository root and use the `Cognitive Recognition framework` path prefix shown below.
+
 ## Project Goals
 
 The system is designed to help a mobile robot:
@@ -82,13 +84,13 @@ The paths referenced in the feature sections below are therefore branch-dependen
 The project is developed on Windows with Python 3.11. A prepared environment is available locally as:
 
 ```text
-07_environment_and_project_meta/.venv-gpu311/
+Cognitive Recognition framework/07_environment_and_project_meta/.venv-gpu311/
 ```
 
 Use the project interpreter rather than the system Python:
 
 ```powershell
-$Python = ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
+$Python = ".\Cognitive Recognition framework\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
 & $Python --version
 ```
 
@@ -108,8 +110,8 @@ CUDA is recommended for YOLO and Grounding DINO. CPU fallback is supported by so
 
 GitHub path:
 
-- Weight: [`03_models_and_weights/models/yolo_trained_v1.pt`](03_models_and_weights/models/yolo_trained_v1.pt)
-- Class reference: [`01_codebase/03_data_preparation/hospital_model_classes.txt`](01_codebase/03_data_preparation/hospital_model_classes.txt)
+- Weight: [`03_models_and_weights/models/yolo_trained_v1.pt`](Cognitive%20Recognition%20framework/03_models_and_weights/models/yolo_trained_v1.pt)
+- Class reference: [`01_codebase/03_data_preparation/hospital_model_classes.txt`](Cognitive%20Recognition%20framework/01_codebase/03_data_preparation/hospital_model_classes.txt)
 
 V1 contains 106 classes:
 
@@ -120,7 +122,7 @@ V1 contains 106 classes:
 
 GitHub path:
 
-- Weight: [`03_models_and_weights/yolo_trained_v2.pt`](03_models_and_weights/yolo_trained_v2.pt)
+- Weight: [`03_models_and_weights/yolo_trained_v2.pt`](Cognitive%20Recognition%20framework/03_models_and_weights/yolo_trained_v2.pt)
 
 V2 identifies these 12 classes:
 
@@ -132,14 +134,14 @@ V2 is useful for focused hospital-sign, PPE, infrastructure, and hazard-object d
 
 GitHub path:
 
-- Weight: [`03_models_and_weights/models/yolo_trained_v3.pt`](03_models_and_weights/models/yolo_trained_v3.pt)
-- Class reference: [`01_codebase/03_data_preparation/hospital_model_classes.txt`](01_codebase/03_data_preparation/hospital_model_classes.txt)
+- Weight: [`03_models_and_weights/models/yolo_trained_v3.pt`](Cognitive%20Recognition%20framework/03_models_and_weights/models/yolo_trained_v3.pt)
+- Class reference: [`01_codebase/03_data_preparation/hospital_model_classes.txt`](Cognitive%20Recognition%20framework/01_codebase/03_data_preparation/hospital_model_classes.txt)
 
 V3 contains 109 classes: all 106 V1 classes plus:
 
 `bag`, `exit_sign`, `spillage`.
 
-The shared V1/V3 ensemble routes overlapping classes through NMS and uses V3 for the new classes. The principal implementation is [`01_codebase/07_object_detection/YOLO_ensemble+DINO.py`](01_codebase/07_object_detection/YOLO_ensemble%2BDINO.py), while the image ensemble is [`01_codebase/02_inference/infer_ensemble.py`](01_codebase/02_inference/infer_ensemble.py).
+The shared V1/V3 ensemble routes overlapping classes through NMS and uses V3 for the new classes. The principal implementation is [`01_codebase/07_object_detection/YOLO_ensemble+DINO.py`](Cognitive%20Recognition%20framework/01_codebase/07_object_detection/YOLO_ensemble%2BDINO.py), while the image ensemble is [`01_codebase/02_inference/infer_ensemble.py`](Cognitive%20Recognition%20framework/01_codebase/02_inference/infer_ensemble.py).
 
 ### Model Paths in the Detector
 
@@ -161,7 +163,7 @@ Grounding DINO is an open-vocabulary detector used as a fallback and contextual 
 IDEA-Research/grounding-dino-base
 ```
 
-Configuration is maintained in [`01_codebase/07_object_detection/dino_prompts.py`](01_codebase/07_object_detection/dino_prompts.py) and in some older HospitalGuard scripts.
+Configuration is maintained in [`01_codebase/07_object_detection/dino_prompts.py`](Cognitive%20Recognition%20framework/01_codebase/07_object_detection/dino_prompts.py) and in some older HospitalGuard scripts.
 
 The workflow is:
 
@@ -177,13 +179,13 @@ Grounding DINO does not replace the trained YOLO models. It supplements classes 
 
 ## Shared RGB/RGB-D Detection Pipeline
 
-The main shared entry point is [`01_codebase/07_object_detection/YOLO_ensemble+DINO.py`](01_codebase/07_object_detection/YOLO_ensemble%2BDINO.py). Supporting modules are:
+The main shared entry point is [`01_codebase/07_object_detection/YOLO_ensemble+DINO.py`](Cognitive%20Recognition%20framework/01_codebase/07_object_detection/YOLO_ensemble%2BDINO.py). Supporting modules are:
 
-- [`common_sense_filter.py`](01_codebase/07_object_detection/common_sense_filter.py): rule-based rejection of implausible detections.
-- [`bin_classifier.py`](01_codebase/07_object_detection/bin_classifier.py): bin subtype refinement.
-- [`dino_fallback.py`](01_codebase/07_object_detection/dino_fallback.py): Grounding DINO inference.
-- [`rgbd_3d_filter.py`](01_codebase/07_object_detection/rgbd_3d_filter.py): depth-based geometry and physical-size filtering.
-- [`rgbd_bag_processing.py`](01_codebase/07_object_detection/rgbd_bag_processing.py): RGB-D replay support.
+- [`common_sense_filter.py`](Cognitive%20Recognition%20framework/01_codebase/07_object_detection/common_sense_filter.py): rule-based rejection of implausible detections.
+- [`bin_classifier.py`](Cognitive%20Recognition%20framework/01_codebase/07_object_detection/bin_classifier.py): bin subtype refinement.
+- [`dino_fallback.py`](Cognitive%20Recognition%20framework/01_codebase/07_object_detection/dino_fallback.py): Grounding DINO inference.
+- [`rgbd_3d_filter.py`](Cognitive%20Recognition%20framework/01_codebase/07_object_detection/rgbd_3d_filter.py): depth-based geometry and physical-size filtering.
+- [`rgbd_bag_processing.py`](Cognitive%20Recognition%20framework/01_codebase/07_object_detection/rgbd_bag_processing.py): RGB-D replay support.
 
 A typical image or video detector produces annotated media under `04_outputs_runs_and_logs/OD_Outputs` or the output directory defined by the individual script.
 
@@ -191,7 +193,7 @@ A typical image or video detector produces annotated media under `04_outputs_run
 
 The RGB-D filter back-projects valid depth pixels inside a detection box into 3D. It estimates an oriented width and height using depth points and PCA, then compares the result with class-specific metric limits.
 
-On `main`, the gate reads [`hospital_object_dimensions_approx.yaml`](01_codebase/07_object_detection/hospital_object_dimensions_approx.yaml). It is enabled by default for the configured bin physical gate and spillage floor gate. A detection is retained when its measured dimensions fall within the configured class range. Generic names such as `bin` can map to multiple candidate size profiles.
+On `main`, the gate reads [`hospital_object_dimensions_approx.yaml`](Cognitive%20Recognition%20framework/01_codebase/07_object_detection/hospital_object_dimensions_approx.yaml). It is enabled by default for the configured bin physical gate and spillage floor gate. A detection is retained when its measured dimensions fall within the configured class range. Generic names such as `bin` can map to multiple candidate size profiles.
 
 On the `ontology` and `semantic-map` branches, structured `physicalDimensions` annotations in `ontology.rdf` are used as the knowledge authority. The same normalized dimension knowledge is exposed to the object detector, semantic-map HTML inspector, Rerun metadata, and RDF export. This prevents the viewer and the RGB-D gate from silently using different size assumptions.
 
@@ -213,9 +215,9 @@ Use a bag directory, not an individual image, when running the RGB-D pipelines.
 Example bag smoke check:
 
 ```powershell
-$Python = ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
-& $Python ".\01_codebase\04_rgbd_and_spatial_twin\hospital_detector_longterm\rgbd_development\scripts\rgbd_spatial_twin.py" `
-  --sequence-root ".\01_codebase\04_rgbd_and_spatial_twin\hospital_detector_longterm\rgbd_development\data\rgbd_dataset_freiburg1_xyz" `
+$Python = ".\Cognitive Recognition framework\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
+& $Python ".\Cognitive Recognition framework\01_codebase\04_rgbd_and_spatial_twin\hospital_detector_longterm\rgbd_development\scripts\rgbd_spatial_twin.py" `
+  --sequence-root ".\Cognitive Recognition framework\01_codebase\04_rgbd_and_spatial_twin\hospital_detector_longterm\rgbd_development\data\rgbd_dataset_freiburg1_xyz" `
   --no-db --max-frames 30
 ```
 
@@ -229,28 +231,28 @@ The blocked-exit workflow combines YOLO, Grounding DINO, optional SAM segmentati
 
 Main files:
 
-- [`door_zone_rgbd.py`](01_codebase/06_anomaly_detection/Blocked_exit_detection/door_zone_rgbd.py): RGB-D door zone geometry and rendering.
-- [`Door-exit_Detect.py`](01_codebase/06_anomaly_detection/Blocked_exit_detection/Door-exit_Detect.py): door/exit detection.
-- [`Obstruction_detection.py`](01_codebase/06_anomaly_detection/Blocked_exit_detection/Obstruction_detection.py): obstruction decision workflow.
-- [`RGBD_Reader.py`](01_codebase/06_anomaly_detection/Blocked_exit_detection/RGBD_Reader.py): synchronized RGB-D bag reader.
+- [`door_zone_rgbd.py`](Cognitive%20Recognition%20framework/01_codebase/06_anomaly_detection/Blocked_exit_detection/door_zone_rgbd.py): RGB-D door zone geometry and rendering.
+- [`Door-exit_Detect.py`](Cognitive%20Recognition%20framework/01_codebase/06_anomaly_detection/Blocked_exit_detection/Door-exit_Detect.py): door/exit detection.
+- [`Obstruction_detection.py`](Cognitive%20Recognition%20framework/01_codebase/06_anomaly_detection/Blocked_exit_detection/Obstruction_detection.py): obstruction decision workflow.
+- [`RGBD_Reader.py`](Cognitive%20Recognition%20framework/01_codebase/06_anomaly_detection/Blocked_exit_detection/RGBD_Reader.py): synchronized RGB-D bag reader.
 
 Example:
 
 ```powershell
-$Python = ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
-& $Python ".\01_codebase\06_anomaly_detection\Blocked_exit_detection\door_zone_rgbd.py" `
-  --bag ".\02_datasets\saxon\hallway 1"
+$Python = ".\Cognitive Recognition framework\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
+& $Python ".\Cognitive Recognition framework\01_codebase\06_anomaly_detection\Blocked_exit_detection\door_zone_rgbd.py" `
+  --bag ".\Cognitive Recognition framework\02_datasets\saxon\hallway 1"
 ```
 
 The branch-specific v2 semantic-map monitor is in `01_codebase/06_anomaly_detection/Blocked_exit_detection/v2/exit_obstruction.py` on `blocked-exit-detection`. It persists per-frame egress obstruction events and can be tested with `10_Testing/test_exit_obstruction_v2.py`.
 
 ### Spillage
 
-Spillage workflows combine RGB/DINO detection, floor or position checks, dwell-time logic, and alert output. Start with [`detect_dwelled_spillage.py`](01_codebase/06_anomaly_detection/spillage_detection/detect_dwelled_spillage.py) or the temporal HospitalGuard implementation under `01_codebase/06_anomaly_detection/Spillage detection`.
+Spillage workflows combine RGB/DINO detection, floor or position checks, dwell-time logic, and alert output. Start with [`detect_dwelled_spillage.py`](Cognitive%20Recognition%20framework/01_codebase/06_anomaly_detection/spillage_detection/detect_dwelled_spillage.py) or the temporal HospitalGuard implementation under `Cognitive Recognition framework/01_codebase/06_anomaly_detection/Spillage detection`.
 
 ### Unauthorized Access
 
-[`Unauthorized_access.py`](01_codebase/06_anomaly_detection/Unauthorized_access.py) detects and classifies roles using YOLO person detection plus Grounding DINO crop verification. It distinguishes roles such as healthcare worker, patient, doctor, and general person according to the script configuration.
+[`Unauthorized_access.py`](Cognitive%20Recognition%20framework/01_codebase/06_anomaly_detection/Unauthorized_access.py) detects and classifies roles using YOLO person detection plus Grounding DINO crop verification. It distinguishes roles such as healthcare worker, patient, doctor, and general person according to the script configuration.
 
 ## Ontology and Semantic Map
 
@@ -276,9 +278,9 @@ For a feature-branch checkout:
 
 ```powershell
 git switch semantic-map
-$Python = ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
-& $Python ".\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
-  --bag ".\02_datasets\saxon\rgbd_clean_20260521_142555" `
+$Python = ".\Cognitive Recognition framework\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
+& $Python ".\Cognitive Recognition framework\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
+  --bag ".\Cognitive Recognition framework\02_datasets\saxon\rgbd_clean_20260521_142555" `
   --frame-stride 3
 ```
 
@@ -300,14 +302,14 @@ Rerun has two different roles:
 The persistent database and HTML viewer are therefore the current state, while `.rrd` is an explicit visualization export. On the semantic-map branch:
 
 ```powershell
-$Python = ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
-& $Python ".\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
-  --bag ".\02_datasets\saxon\rgbd_clean_20260521_142555" `
+$Python = ".\Cognitive Recognition framework\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
+& $Python ".\Cognitive Recognition framework\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
+  --bag ".\Cognitive Recognition framework\02_datasets\saxon\rgbd_clean_20260521_142555" `
   --frame-stride 3 --rerun `
   --rerun-cloud-stride 10 --rerun-cloud-every 10
 
-$Rerun = ".\07_environment_and_project_meta\.venv-gpu311\Scripts\rerun.exe"
-& $Rerun ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.rrd"
+$Rerun = ".\Cognitive Recognition framework\07_environment_and_project_meta\.venv-gpu311\Scripts\rerun.exe"
+& $Rerun ".\Cognitive Recognition framework\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.rrd"
 ```
 
 The full snapshot can contain:
@@ -339,8 +341,8 @@ For HTML, open the generated `semantic_map_ontology.html` in a browser. For Reru
 Focused tests should be run with the project interpreter:
 
 ```powershell
-$Python = ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
-& $Python -m unittest discover -s 10_Testing -p "test_*.py" -v
+$Python = ".\Cognitive Recognition framework\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe"
+& $Python -m unittest discover -s ".\Cognitive Recognition framework\10_Testing" -p "test_*.py" -v
 ```
 
 Feature-branch semantic-map tests cover ontology resolution, HTML generation, Rerun metadata, and landmark path stability. The blocked-exit v2 branch adds CPU-only geometry tests.
