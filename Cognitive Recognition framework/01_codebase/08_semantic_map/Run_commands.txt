@@ -29,7 +29,7 @@ cd "D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework"
 # Person is excluded by default.
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
   ".\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
-  --bag ".\02_datasets\saxon\rgbd_clean_20260521_142555" `
+  --bag ".\02_datasets\saxon\hallway 1" `
   --frame-stride 3 `
   --rerun `
   --rerun-cloud-stride 10 `
@@ -39,7 +39,7 @@ For a live Rerun window while it processes, add --rerun-spawn:
 
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
   ".\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
-  --bag ".\02_datasets\saxon\rgbd_clean_20260521_142555" `
+  --bag ".\02_datasets\saxon\hallway 1" `
   --frame-stride 3 --rerun --rerun-spawn `
   --rerun-cloud-stride 10 --rerun-cloud-every 10
 
@@ -62,3 +62,25 @@ $env:Path = (Resolve-Path ".\07_environment_and_project_meta\.venv-gpu311\Script
 # Run this in a second PowerShell terminal after opening world_map.rrd.
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
   -c "import sys,sqlite3,rerun as rr; from pathlib import Path; sys.path[:0]=[r'01_codebase/08_semantic_map',r'01_codebase/09_ontology']; import view_semantic_map as v; from rerun_logger import log_landmark_entities; db=Path(r'04_outputs_runs_and_logs/outputs/semantic_maps/rgbd_clean_20260521_142555/world_map.db'); con=sqlite3.connect(db); landmarks=v.load_landmarks(con,1,None); con.close(); v.attach_ontology_knowledge(landmarks,v.OntologyKnowledgeBase()); rr.init('ontology_overlay',spawn=False); rr.connect_grpc('rerun+http://127.0.0.1:9876/proxy'); log_landmark_entities(landmarks); print(f'Injected ontology metadata for {len(landmarks)} landmarks')"
+
+
+# Blocked-exit v2: semantic map is the event source of truth. The OpenCV
+# preview and preview.mp4 show EXIT BLOCKED; Rerun stays synchronized as map context.
+# Start with a short replay because it loads the additional v1 YOLO+DINO monitor.
+# Add --exit-use-sam only after placing the optional SAM checkpoint in v1/sam_masker.
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
+  ".\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
+  --bag ".\02_datasets\saxon\rgbd_clean_20260521_142555" `
+  --max-frames 30 --frame-stride 1 `
+  --enable-exit-obstruction --exit-keep-clear-radius-m 1.0 `
+  --rerun --rerun-spawn `
+  --rerun-cloud-stride 10 --rerun-cloud-every 10
+
+# Full synchronized map and blocked-exit replay after the smoke run is correct.
+& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
+  ".\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
+  --bag ".\02_datasets\saxon\rgbd_clean_20260521_142555" `
+  --frame-stride 3 `
+  --enable-exit-obstruction --exit-keep-clear-radius-m 1.0 `
+  --rerun --rerun-spawn `
+  --rerun-cloud-stride 10 --rerun-cloud-every 10

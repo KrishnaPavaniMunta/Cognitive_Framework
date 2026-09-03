@@ -42,6 +42,9 @@ CODEBASE_DIR = BASE_DIR.parent
 PROJECT_ROOT = CODEBASE_DIR.parent
 OBJECT_DETECTION_DIR = CODEBASE_DIR / "07_object_detection"
 ONTOLOGY_DIR = CODEBASE_DIR / "09_ontology"
+EXIT_OBSTRUCTION_V2_DIR = (
+    CODEBASE_DIR / "06_anomaly_detection" / "Blocked_exit_detection" / "v2"
+)
 DEFAULT_ONTOLOGY = ONTOLOGY_DIR / "ontology.rdf"
 
 if str(OBJECT_DETECTION_DIR) not in sys.path:
@@ -191,6 +194,27 @@ class SemanticMapDB:
                 map_class_name    TEXT NOT NULL,
                 updated_utc       TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS egress_obstruction_events (
+                event_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id            TEXT NOT NULL,
+                frame_index       INTEGER NOT NULL,
+                timestamp_ns      INTEGER NOT NULL,
+                world_frame       TEXT,
+                door_cam_X        REAL, door_cam_Y REAL, door_cam_Z REAL,
+                door_world_X      REAL, door_world_Y REAL, door_world_Z REAL,
+                zone_radius_m     REAL NOT NULL,
+                door_top_cam_Y    REAL, door_bottom_cam_Y REAL,
+                door_mask_distortion REAL,
+                door_shape_obstruction INTEGER NOT NULL,
+                obstruction_flag  INTEGER NOT NULL,
+                blockers_json     TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_egress_events_run_frame
+                ON egress_obstruction_events(run_id, frame_index);
+            CREATE INDEX IF NOT EXISTS idx_egress_events_blocked
+                ON egress_obstruction_events(obstruction_flag);
             """
         )
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(semantic_map)")}
@@ -267,6 +291,46 @@ class SemanticMapDB:
             "INSERT OR REPLACE INTO camera_poses VALUES (?,?,?,?,?,?,?,?,?)",
             (int(frame_index), int(timestamp_ns), world_frame, camera_frame, status,
              float(m[0, 3]), float(m[1, 3]), float(m[2, 3]), json.dumps(m.tolist())),
+        )
+
+    def add_egress_obstruction_event(
+        self,
+        run_id: str,
+        frame_index: int,
+        timestamp_ns: int,
+        world_frame: str | None,
+        result: Any,
+        door_world_xyz: tuple[float, float, float] | None,
+        zone_radius_m: float,
+    ) -> None:
+        blockers = [
+            {
+                "object_index": blocker["object_index"],
+                "bbox_xyxy": blocker["bbox_xyxy"],
+                "confidence": blocker["confidence"],
+                "depth_m": blocker["depth_m"],
+            }
+            for blocker in result.blockers
+        ]
+        door_camera_xyz = result.door_camera_xyz
+        self.conn.execute(
+            """
+            INSERT INTO egress_obstruction_events (
+                run_id, frame_index, timestamp_ns, world_frame,
+                door_cam_X, door_cam_Y, door_cam_Z,
+                door_world_X, door_world_Y, door_world_Z,
+                zone_radius_m, door_top_cam_Y, door_bottom_cam_Y,
+                door_mask_distortion, door_shape_obstruction, obstruction_flag, blockers_json
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                run_id, int(frame_index), int(timestamp_ns), world_frame,
+                *(door_camera_xyz or (None, None, None)),
+                *(door_world_xyz or (None, None, None)),
+                float(zone_radius_m), result.door_top_y, result.door_bottom_y,
+                result.door_mask_distortion, int(result.door_shape_obstruction),
+                int(result.obstruction_flag), json.dumps(blockers),
+            ),
         )
 
     def add_observation(self, record: dict[str, Any]) -> tuple[int | None, int | None]:
@@ -363,7 +427,14 @@ class SemanticMapDB:
                 _ns_to_iso(lm["first_seen_ns"]), _ns_to_iso(lm["last_seen_ns"]),
             ))
         self.conn.executemany(
-            "INSERT INTO semantic_map VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows
+            """
+            INSERT INTO semantic_map (
+                landmark_id, class_name, instance_id, world_frame, X, Y, Z,
+                hit_count, mean_confidence, max_confidence, first_seen_ns, last_seen_ns,
+                first_seen, last_seen
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            rows,
         )
         self.conn.commit()
 
@@ -471,6 +542,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--v1-path", default="")
     p.add_argument("--v2-path", default="")
     p.add_argument("--v3-path", default="")
+    p.add_argument("--enable-exit-obstruction", action="store_true",
+                   help="Run the v1 YOLO+DINO+SAM blocked-exit monitor and persist per-frame events")
+    p.add_argument("--exit-keep-clear-radius-m", type=float, default=1.0,
+                   help="Door keep-clear half-cylinder radius in metres")
+    p.add_argument("--exit-use-sam", action="store_true",
+                   help="Use SAM mask refinement for exit monitoring (requires the optional SAM checkpoint)")
 
     p.add_argument("--no-preview", action="store_true", help="Disable the live OpenCV preview window")
     p.add_argument("--no-video", action="store_true", help="Do not record preview.mp4")
@@ -495,6 +572,10 @@ def parse_args() -> argparse.Namespace:
     args = p.parse_args()
     if args.rerun_only:
         args.rerun = True
+    if args.exit_keep_clear_radius_m <= 0.0:
+        p.error("--exit-keep-clear-radius-m must be positive")
+    if args.rerun_only and args.enable_exit_obstruction:
+        p.error("--enable-exit-obstruction cannot be combined with --rerun-only")
     return args
 
 
@@ -664,6 +745,16 @@ def main() -> None:
                     "Use --allow-no-extrinsics to map in the camera frame instead.")
 
     detector = None if args.rerun_only else build_detector(args)
+    exit_monitor = None
+    if args.enable_exit_obstruction:
+        if str(EXIT_OBSTRUCTION_V2_DIR) not in sys.path:
+            sys.path.insert(0, str(EXIT_OBSTRUCTION_V2_DIR))
+        from exit_obstruction import ExitObstructionMonitor
+
+        exit_monitor = ExitObstructionMonitor(args.exit_keep_clear_radius_m, use_sam=args.exit_use_sam)
+        LOG.info("[EXIT] Loading v1 YOLO+DINO obstruction monitor (radius=%.2fm, SAM=%s) ...",
+             args.exit_keep_clear_radius_m, args.exit_use_sam)
+        exit_monitor.load()
 
     depth_ts = [m.timestamp_ns for m in depth_messages]
     cam_ts = [m.timestamp_ns for m in caminfo_messages]
@@ -710,6 +801,7 @@ def main() -> None:
         "rejected_no_depth_value": 0, "rejected_no_extrinsics": 0,
         "frames_missing_extrinsics": 0, "odom_fallback_frames": 0, "identity_pose_frames": 0,
         "implausible_height_pins": 0,
+        "egress_frames_evaluated": 0, "egress_blocked_frames": 0,
     }
     class_histogram: dict[str, int] = {}
     world_frame_seen: set[str] = set()
@@ -811,6 +903,26 @@ def main() -> None:
             stats["detections_total"] += len(detections)
             processed_counter += 1
             stats["processed_frames"] += 1
+
+            exit_result = None
+            if exit_monitor is not None:
+                exit_result = exit_monitor.evaluate(rgb_img, depth_mm, intr, processed_counter)
+                door_world_xyz = (
+                    transform_point(pose_matrix, exit_result.door_camera_xyz)
+                    if pose_matrix is not None and exit_result.door_camera_xyz is not None
+                    else None
+                )
+                db.add_egress_obstruction_event(
+                    run_id,
+                    processed_counter,
+                    rgb_item.timestamp_ns,
+                    world_frame if pose_matrix is not None else None,
+                    exit_result,
+                    door_world_xyz,
+                    args.exit_keep_clear_radius_m,
+                )
+                stats["egress_frames_evaluated"] += 1
+                stats["egress_blocked_frames"] += int(exit_result.obstruction_flag)
 
             LOG.debug(
                 "[FRAME %05d] t=%.3fs depth_dt=%.1fms dets=%d tf=%s (%s)",
@@ -914,6 +1026,8 @@ def main() -> None:
 
             annotated = annotate(rgb_img, processed_counter, rgb_item.timestamp_ns,
                                  pins, len(db.landmarks), extrinsics_status)
+            if exit_monitor is not None and exit_result is not None:
+                annotated = exit_monitor.draw_overlay(annotated, exit_result, intr)
 
             if not args.no_video:
                 if writer is None:
@@ -1003,6 +1117,9 @@ def main() -> None:
             "depth_gate_enabled": not args.disable_depth_gate,
             "detector_device": None if detector is None else detector.device,
             "rerun_only": args.rerun_only,
+            "exit_obstruction_enabled": args.enable_exit_obstruction,
+            "exit_keep_clear_radius_m": args.exit_keep_clear_radius_m,
+            "exit_use_sam": args.exit_use_sam,
         },
         "stats": stats,
         "landmark_count": len(db.landmarks),

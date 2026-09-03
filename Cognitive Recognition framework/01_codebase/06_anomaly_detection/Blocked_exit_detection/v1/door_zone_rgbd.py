@@ -69,7 +69,7 @@ HOLD_FRAMES   = det.HOLD_FRAMES
 ZONE_FACE_COLOR   = (60,  60, 220)    # light red fill (BGR)
 ZONE_SHADE_COLOR  = (30,  30, 160)    # darker red for shaded curved wall
 ZONE_EDGE_COLOR   = (0,   0, 255)     # bright red edges
-ZONE_FILL_ALPHA   = 0.35              # translucency of faces
+ZONE_FILL_ALPHA   = 0.15              # translucency of faces
 DOOR_POLY_COLOR   = (0, 200, 255)     # door mask outline (yellow)
 TXT_COLOR         = (255, 255, 255)
 
