@@ -255,6 +255,9 @@ h2 { margin-bottom: 0; font: 400 clamp(34px, 4vw, 54px)/1.14 var(--serif); lette
 .event-chip span { width: 7px; height: 7px; border-radius: 50%; background: var(--rust); }
 .robot-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 90px; align-items: center; margin-top: 92px; }
 .robot-portrait { position: relative; display: grid; place-items: center; aspect-ratio: 1.1; background: #dde7dd; overflow: hidden; }
+.robot-photo { margin: 0; align-content: end; background: #eef2ec; }
+.robot-photo img { width: 100%; height: 100%; object-fit: contain; padding: 18px; }
+.robot-photo figcaption { width: 100%; padding: 12px 15px; background: rgba(23,35,33,.9); color: var(--paper); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .04em; }
 .robot-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(56,90,79,.13) 1px, transparent 1px), linear-gradient(90deg, rgba(56,90,79,.13) 1px, transparent 1px); background-size: 42px 42px; transform: perspective(280px) rotateX(49deg) scale(1.6); transform-origin: center bottom; }
 .robot-icon { position: relative; display: grid; place-items: center; gap: 14px; width: 205px; height: 205px; border: 1px solid var(--moss); color: var(--moss); text-align: center; font: 11px/1.4 var(--mono); text-transform: uppercase; z-index: 1; }
 .portrait-label { position: absolute; bottom: 17px; left: 18px; color: var(--moss); }
