@@ -32,6 +32,33 @@ const systemSteps = [
   ['04', 'Reason', 'Rules and common sense turn raw detections into interpretable safety events.'],
 ]
 
+const yoloClasses = ['person', 'fire hydrant', 'bench', 'backpack', 'handbag', 'suitcase', 'baseball glove', 'bottle', 'cup', 'fork', 'knife', 'spoon', 'chair', 'couch', 'bed', 'dining table', 'toilet', 'sink', 'scissors', 'cabinet', 'glove', 'healthcare_worker', 'hospital_bed', 'infusion_pump', 'iv_bag', 'iv_stand', 'nasal_cannula', 'patient', 'patient_monitor', 'surgical_light', 'test_tube', 'vending_machines', 'wheelchair', 'bench_hosp', 'door', 'reception_counter', 'radiator', 'bathroom_labels', 'fire_extinguisher', 'hospital_stretcher', 'security_camera', 'hair_net', 'mask', 'surgical_scissor', 'bag', 'exit_sign', 'spillage', 'bin', 'Electrical_cabinet', 'Hand_sanitizer', 'Hazmat_sign', 'wet_floor_sign']
+const dinoFallbackClasses = ['surgical_scissor', 'surgical_light', 'glove', 'mask', 'hair_net', 'radiator', 'exit_sign', 'door', 'hand_sanitizer', 'bin', 'hazmat_sign', 'iv_stand', 'Infusion_pump']
+const dinoOnlyClasses = ['Medical_tray', 'Power_socket', 'Oxygen_pump', 'Utility_trolley']
+const subclassGroups = [
+  { parent: 'Bin', classes: ['General_bin', 'Tiger_stripe_bin', 'yellow_bin'] },
+  { parent: 'Person', classes: ['Person (YOLO)', 'Doctor', 'Patient (YOLO)', 'Healthcare_Worker (YOLO)'] },
+]
+
+const activeSafetyInspections = [
+  { title: 'Blocked exit / door obstruction', risk: 'Emergency access or an exit route is no longer clear.', objects: ['door', 'exit_sign', 'chair', 'couch', 'bench', 'bench_hosp', 'bed', 'hospital_bed', 'hospital_stretcher', 'wheelchair', 'utility_trolley', 'bag', 'backpack', 'handbag', 'suitcase', 'bin', 'medical_tray'], signals: ['door or exit sign detected', 'obstruction object detected nearby', 'overlap with doorway / exit region', 'persistent in semantic map'], how: ['Detect doorway evidence using YOLO and Grounding DINO fallback for door or exit_sign.', 'Detect candidate obstruction objects from the vocabulary, such as chairs, wheelchairs, trolleys, beds, bags, bins, or trays.', 'Use RGB-D position, bounding boxes, and physical-dimension checks to reject implausible objects.', 'Ground detections to ontology classes and store their positions in the semantic map.', 'Trigger the blocked-exit event when an obstacle is close to or overlaps the door or exit path for the required observation window.'] },
+  { title: 'Spillage / slip hazard', risk: 'A floor region may be unsafe for people or robot navigation.', objects: ['spillage', 'wet_floor_sign', 'bottle', 'cup', 'sink', 'toilet', 'iv_bag', 'bin', 'medical_tray'], signals: ['spillage class detected', 'near walkable area', 'supporting source object nearby', 'wet floor sign context'], how: ['Detect spillage directly as a trained object class in the scene.', 'Use supporting vocabulary objects such as bottle, cup, sink, toilet, iv_bag, bin, or medical_tray as contextual evidence.', 'Ground the spillage and related objects to ontology classes.', 'Place the spillage observation into the semantic map with location and time.', 'Trigger the spillage event when the spill is located on or near a walkable floor area, with wet_floor_sign presence recorded as contextual evidence.'] },
+]
+const workInProgressInspections = ['Fire and safety equipment access', 'Hazard sign / restricted area awareness', 'PPE and clinical context', 'Unsafe object placement']
+const safetyRoadmap = [
+  { title: 'Abandoned bag detection', status: 'In concentration', detail: 'Detect unattended bags and relate them to nearby people, dwell time, and zone context.' },
+  { title: 'Unauthorized access', status: 'Role identification done', detail: 'Uses role identification for doctor, patient, and healthcare worker before checking access-sensitive zones.' },
+  { title: 'Fire safety', status: 'In concentration', detail: 'Rules for fire-safety objects, blocked fire equipment, fire signage, and emergency access.' },
+  { title: 'Zone-aware anomaly detection', status: 'In concentration', detail: 'Connects events to hospital zones so risk depends on where the object or person appears.' },
+  { title: 'Electrical cable risks', status: 'In concentration', detail: 'Rules for exposed or obstructive cables, power sockets, electrical cabinets, and trip-risk context.' },
+  { title: 'Hazardous materials bin', status: 'In concentration', detail: 'Kelvin hazmat-bin checks using bin subclasses, colour patterns, and hazardous-material signage.' },
+  { title: 'Dwelled spillage detection', status: 'Active refinement', detail: 'Extends spillage detection with persistence over time so temporary detections become confirmed events.' },
+  { title: 'Open doors and windows', status: 'In concentration', detail: 'Detects open-state cues and connects door/window state to zone, access, and safety context.' },
+  { title: 'Children in hospital', status: 'In concentration', detail: 'Tracks child-presence rules for restricted, clinical, or risk-sensitive hospital areas.' },
+  { title: 'Red Amber Green alerts', status: 'In concentration', detail: 'Maps rule confidence and severity into RAG alert levels for inspection reporting.' },
+  { title: 'Testing benchmark', status: 'In concentration', detail: 'Benchmarking rule performance, detection reliability, false positives, and inspection latency.' },
+]
+
 function InstitutionalMark({ type, children }) {
   const logos = { 'ou-mark': [`${PUBLIC_BASE}logos/open-university.svg`, 'The Open University'], 'kmi-mark': [`${PUBLIC_BASE}logos/kmi.svg`, 'Knowledge Media Institute'], 'resilient-mark': [`${PUBLIC_BASE}logos/resilient-enterprise.svg`, 'Resilient Enterprise'] }
   const [src, alt] = logos[type]
@@ -39,7 +66,7 @@ function InstitutionalMark({ type, children }) {
 }
 
 function PageHeader() {
-  return <header className="site-header"><a className="brand" href="#/" aria-label="Cognitive Recognition Framework home"><span className="brand-mark">CRF</span><span><strong>Cognitive Recognition</strong><small>Framework</small></span></a><nav className="nav-links page-nav"><a href="#/research">Research</a><a href="#/architecture">Architecture</a><a href="#/demonstrations">Demonstrations</a><a href="#/ontology">Ontology</a><a href="#/robot">Robot</a><a href="#/about">About</a></nav><a className="header-link" href="https://github.com/KrishnaPavaniMunta" target="_blank" rel="noreferrer" aria-label="Krishna Pavani Munta on GitHub"><SiGithub size={18} /> GitHub</a></header>
+  return <header className="site-header"><a className="brand" href="#/" aria-label="Cognitive Recognition Framework home"><span className="brand-mark">CRF</span><span><strong>Cognitive Recognition</strong><small>Framework</small></span></a><nav className="nav-links page-nav"><a href="#/research">Research</a><a href="#/architecture">Architecture</a><a href="#/demonstrations">Demonstrations</a><a href="#/ontology">Ontology</a><a href="#/classes">Classes</a><a href="#/safety">Safety</a><a href="#/robot">Robot</a><a href="#/about">About</a></nav><a className="header-link" href="https://github.com/KrishnaPavaniMunta" target="_blank" rel="noreferrer" aria-label="Krishna Pavani Munta on GitHub"><SiGithub size={18} /> GitHub</a></header>
 }
 
 function PageFrame({ eyebrow, title, intro, children }) {
@@ -52,6 +79,18 @@ function ResearchPage() {
 
 function DemonstrationsPage() {
   return <PageFrame eyebrow="Working examples / 02" title={<>From detection to <em>decision.</em></>} intro="Two working examples show how the framework narrows raw perception into interpretable hospital-safety reasoning."><section className="dark-band page-band"><div className="section-wrap"><div className="demo-grid">{demonstrations.map((demo) => <article className="demo-card" key={demo.id}><div className="video-frame"><video controls preload="metadata" src={demo.video}><track kind="captions" /></video><span className="video-index">{demo.eyebrow}</span></div><div className="demo-copy"><p className="eyebrow">{demo.eyebrow}</p><h3>{demo.title}</h3><p>{demo.description}</p><div className="tag-list">{demo.tags.map(tag => <span key={tag}>{tag}</span>)}</div></div></article>)}</div><div className="method-strip"><span>Detection</span><b>→</b><span>Dimension gate</span><b>→</b><span>Common sense</span><b>→</b><span>Safety event</span></div></div></section></PageFrame>
+}
+
+function ClassPills({ items }) {
+  return <div className="class-pill-grid">{items.map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}</div>
+}
+
+function ObjectClassesPage() {
+  return <PageFrame eyebrow="Object classes / 05" title={<>Hospital objects, grouped by <em>detection role.</em></>} intro="This section describes the object classes detected within hospital environments by the system. YOLO handles the primary trained classes, while Grounding DINO supports missed detections and new classes outside the original YOLO training set."><section className="section-wrap classes-page"><div className="class-summary"><article><strong>60</strong><span>total classes represented across trained, fallback, DINO-only, and logic-derived categories</span></article><article><strong>{yoloClasses.length}</strong><span>trained YOLO model classes</span></article><article><strong>{dinoFallbackClasses.length}</strong><span>DINO fallback classes for missed or uncertain detections</span></article><article><strong>{dinoOnlyClasses.length}</strong><span>DINO-only additions beyond the original YOLO training set</span></article></div><div className="classes-explainer"><div><p className="eyebrow">Detection strategy</p><h2>YOLO first, Grounding DINO when the scene asks for more.</h2></div><p>The primary detection is handled by the YOLO model. Grounding DINO serves as a fallback for objects YOLO may miss and also functions as a detector for new classes not included in the original YOLO training set. Certain classes also feature logic-based subclasses identified through specific visual patterns and colours.</p></div><div className="class-board"><article className="class-panel yolo-panel"><div className="class-panel-head"><ScanLine size={24} /><div><p className="eyebrow">Trained YOLO model</p><h3>Primary detector classes</h3></div></div><ClassPills items={yoloClasses} /></article><aside className="class-side"><article className="class-panel dino-panel"><div className="class-panel-head"><ScanLine size={22} /><div><p className="eyebrow">DINO fallback classes</p><h3>Recovered when YOLO misses</h3></div></div><ClassPills items={dinoFallbackClasses} /></article><article className="class-panel addition-panel"><div className="class-panel-head"><GitBranch size={22} /><div><p className="eyebrow">DINO-only additions</p><h3>New class coverage</h3></div></div><ClassPills items={dinoOnlyClasses} /></article><article className="class-panel subclass-panel"><div className="class-panel-head"><BrainCircuit size={22} /><div><p className="eyebrow">Logic-based subclasses</p><h3>Visual pattern and colour rules</h3></div></div><div className="subclass-list">{subclassGroups.map(group => <div key={group.parent}><strong>{group.parent}</strong><ClassPills items={group.classes} /></div>)}</div></article></aside></div></section></PageFrame>
+}
+
+function HealthSafetyPage() {
+  return <PageFrame eyebrow="Health and safety inspection / 06" title={<>Active anomalies connected to the <em>object vocabulary.</em></>} intro="This page currently explains the active event logic for blocked exit detection and spillage detection, then lists the wider health and safety rules now being concentrated on."><section className="section-wrap safety-page"><div className="safety-overview"><article><ShieldCheck size={28} /><strong>{activeSafetyInspections.length}</strong><span>active inspection events</span></article><article><ScanLine size={28} /><strong>YOLO + DINO</strong><span>object evidence sources</span></article><article><Map size={28} /><strong>{safetyRoadmap.length}</strong><span>current concentration items</span></article></div><div className="safety-method"><div><p className="eyebrow">Inspection logic</p><h2>Active rules first, roadmap rules next.</h2></div><p>Blocked-exit detection is raised when a detected door or exit area is spatially associated with blocking objects from the vocabulary. Spillage detection is raised when the spillage class appears in a walkable area and is supported by scene context such as nearby containers, wet-floor signage, or clinical objects. The next rule set expands this into zone-aware, fire-safety, electrical, access-control, child-safety, and benchmarking work.</p></div><div className="safety-grid active-safety-grid">{activeSafetyInspections.map((inspection, index) => <article className="safety-card active-safety-card" key={inspection.title}><div className="safety-card-head"><span>{String(index + 1).padStart(2, '0')}</span><div><h3>{inspection.title}</h3><p>{inspection.risk}</p></div></div><div className="safety-objects"><p className="eyebrow">Connected object vocabulary</p><ClassPills items={inspection.objects} /></div><div className="safety-detection"><p className="eyebrow">How the event is detected</p><ol>{inspection.how.map(step => <li key={step}>{step}</li>)}</ol></div><div className="safety-signals"><p className="eyebrow">Rule signals</p>{inspection.signals.map(signal => <span key={signal}>{signal}</span>)}</div></article>)}</div><section className="roadmap-panel"><div className="roadmap-heading"><p className="eyebrow">Current concentration</p><h2>Rules and benchmarks being developed.</h2></div><div className="roadmap-grid">{safetyRoadmap.map((item, index) => <article key={item.title}><span>{String(index + 1).padStart(2, '0')}</span><div><h3>{item.title}</h3><strong>{item.status}</strong><p>{item.detail}</p></div></article>)}</div></section><section className="wip-panel"><div><p className="eyebrow">Previous WIP grouping</p><h2>Kept as broader work-in-progress areas.</h2></div><ClassPills items={workInProgressInspections} /></section><div className="safety-trace"><p className="eyebrow">Current inspection trace</p><div><span>YOLO / DINO object detections</span><b>→</b><span>dimension and common-sense filtering</span><b>→</b><span>ontology + semantic map</span><b>→</b><strong>blocked exit or spillage event</strong></div></div></section></PageFrame>
 }
 
 const architectureStages = [
@@ -145,6 +184,8 @@ function App() {
   if (route === '#/architecture') return <ArchitecturePage />
   if (route === '#/demonstrations') return <DemonstrationsPage />
   if (route === '#/ontology') return <OntologyPage />
+  if (route === '#/classes') return <ObjectClassesPage />
+  if (route === '#/safety') return <HealthSafetyPage />
   if (route === '#/robot') return <RobotPage />
   if (route === '#/about') return <AboutPage />
 
@@ -161,6 +202,8 @@ function App() {
           <a href="#/architecture" onClick={() => setMenuOpen(false)}>Architecture</a>
           <a href="#/demonstrations" onClick={() => setMenuOpen(false)}>Demonstrations</a>
           <a href="#/ontology" onClick={() => setMenuOpen(false)}>Ontology</a>
+          <a href="#/classes" onClick={() => setMenuOpen(false)}>Classes</a>
+          <a href="#/safety" onClick={() => setMenuOpen(false)}>Safety</a>
           <a href="#/robot" onClick={() => setMenuOpen(false)}>Robot</a>
           <a href="#/about" onClick={() => setMenuOpen(false)}>About</a>
         </nav>
