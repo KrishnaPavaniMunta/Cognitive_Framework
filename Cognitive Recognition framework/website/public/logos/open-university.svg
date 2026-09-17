@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 150" role="img" aria-labelledby="title desc">
+  <title id="title">The Open University</title>
+  <desc id="desc">The Open University Milton Keynes</desc>
+  <path d="M12 18h106v72c0 35-22 51-53 51S12 125 12 90Z" fill="#09094d"/><circle cx="65" cy="52" r="23" fill="#fff"/>
+  <text x="136" y="62" fill="#09094d" font-family="Arial,sans-serif" font-size="53" font-weight="700" letter-spacing="-3">The Open</text><text x="136" y="120" fill="#09094d" font-family="Arial,sans-serif" font-size="53" font-weight="700" letter-spacing="-3">University</text>
+</svg>

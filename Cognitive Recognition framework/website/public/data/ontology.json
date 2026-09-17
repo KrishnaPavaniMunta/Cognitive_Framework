@@ -1,0 +1,921 @@
+{
+  "source": "01_codebase/09_ontology/ontology.rdf",
+  "classCount": 105,
+  "propertyCount": 16,
+  "classes": [
+    {
+      "id": "ContaminationHazard",
+      "label": "Contamination Hazard",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#ContaminationHazard",
+      "parents": [
+        "Hazard"
+      ]
+    },
+    {
+      "id": "FireHazard",
+      "label": "Fire Hazard",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#FireHazard",
+      "parents": [
+        "Hazard"
+      ]
+    },
+    {
+      "id": "Predicate",
+      "label": "Predicate",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Predicate",
+      "parents": []
+    },
+    {
+      "id": "Statement",
+      "label": "Statement",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#Statement",
+      "parents": []
+    },
+    {
+      "id": "TrippingHazard",
+      "label": "Tripping Hazard",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#TrippingHazard",
+      "parents": [
+        "Hazard"
+      ]
+    },
+    {
+      "id": "oxygen_pump",
+      "label": "oxygen pump",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#oxygen_pump",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "switchboard",
+      "label": "switchboard",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#switchboard",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "utility_trolley",
+      "label": "utility trolley",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#utility_trolley",
+      "parents": [
+        "Furniture"
+      ]
+    },
+    {
+      "id": "Alert",
+      "label": "Alert",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Alert",
+      "parents": [
+        "Event"
+      ]
+    },
+    {
+      "id": "Context",
+      "label": "Context",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Context",
+      "parents": []
+    },
+    {
+      "id": "Environment",
+      "label": "Environment",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Environment",
+      "parents": [
+        "Location"
+      ]
+    },
+    {
+      "id": "EnvironmentContext",
+      "label": "Environment Context",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#EnvironmentContext",
+      "parents": [
+        "Context"
+      ]
+    },
+    {
+      "id": "Event",
+      "label": "Event",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Event",
+      "parents": []
+    },
+    {
+      "id": "Furniture",
+      "label": "Furniture",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture",
+      "parents": [
+        "PhysicalObject"
+      ]
+    },
+    {
+      "id": "Hazard",
+      "label": "Hazard",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Hazard",
+      "parents": [
+        "Role"
+      ]
+    },
+    {
+      "id": "HazardEvent",
+      "label": "Hazard Event",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#HazardEvent",
+      "parents": [
+        "Event"
+      ]
+    },
+    {
+      "id": "IndoorSpace",
+      "label": "Indoor Space",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#IndoorSpace",
+      "parents": [
+        "Location"
+      ]
+    },
+    {
+      "id": "Infrastructure",
+      "label": "Infrastructure",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Infrastructure",
+      "parents": [
+        "PhysicalObject"
+      ]
+    },
+    {
+      "id": "Location",
+      "label": "Location",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Location",
+      "parents": []
+    },
+    {
+      "id": "MedicalDevice",
+      "label": "Medical Device",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice",
+      "parents": [
+        "PhysicalObject"
+      ]
+    },
+    {
+      "id": "MonitoredEntity",
+      "label": "Monitored Entity",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MonitoredEntity",
+      "parents": [
+        "Role"
+      ]
+    },
+    {
+      "id": "Obstacle",
+      "label": "Obstacle",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Obstacle",
+      "parents": [
+        "Role"
+      ]
+    },
+    {
+      "id": "Patient",
+      "label": "Patient",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Patient",
+      "parents": [
+        "Person"
+      ]
+    },
+    {
+      "id": "Person",
+      "label": "Person",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Person",
+      "parents": []
+    },
+    {
+      "id": "PersonalBelonging",
+      "label": "Personal Belonging",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PersonalBelonging",
+      "parents": [
+        "PhysicalObject"
+      ]
+    },
+    {
+      "id": "PhysicalObject",
+      "label": "Physical Object",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#PhysicalObject",
+      "parents": []
+    },
+    {
+      "id": "Role",
+      "label": "Role",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Role",
+      "parents": []
+    },
+    {
+      "id": "SafetyEquipment",
+      "label": "Safety Equipment",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyEquipment",
+      "parents": [
+        "PhysicalObject"
+      ]
+    },
+    {
+      "id": "SafetyZone",
+      "label": "Safety Zone",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SafetyZone",
+      "parents": [
+        "Role"
+      ]
+    },
+    {
+      "id": "SpatialContext",
+      "label": "Spatial Context",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#SpatialContext",
+      "parents": [
+        "Context"
+      ]
+    },
+    {
+      "id": "Staff",
+      "label": "Staff",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Staff",
+      "parents": [
+        "Person"
+      ]
+    },
+    {
+      "id": "TemporalContext",
+      "label": "Temporal Context",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#TemporalContext",
+      "parents": [
+        "Context"
+      ]
+    },
+    {
+      "id": "Visitor",
+      "label": "Visitor",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Visitor",
+      "parents": [
+        "Person"
+      ]
+    },
+    {
+      "id": "backpack",
+      "label": "backpack",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#backpack",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "bag",
+      "label": "bag",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bag",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "baseball_glove",
+      "label": "baseball glove",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#baseball_glove",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "bathroom_labels",
+      "label": "bathroom labels",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bathroom_labels",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "bed",
+      "label": "bed",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bed",
+      "parents": [
+        "Furniture"
+      ]
+    },
+    {
+      "id": "bench",
+      "label": "bench",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bench",
+      "parents": [
+        "Furniture"
+      ]
+    },
+    {
+      "id": "bench_hosp",
+      "label": "bench hosp",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bench_hosp",
+      "parents": [
+        "Furniture"
+      ]
+    },
+    {
+      "id": "book",
+      "label": "book",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#book",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "bottle",
+      "label": "bottle",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#bottle",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "cabinet",
+      "label": "cabinet",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#cabinet",
+      "parents": [
+        "Furniture"
+      ]
+    },
+    {
+      "id": "cell_phone",
+      "label": "cell phone",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#cell_phone",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "chair",
+      "label": "chair",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#chair",
+      "parents": [
+        "Furniture"
+      ]
+    },
+    {
+      "id": "clock",
+      "label": "clock",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#clock",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "couch",
+      "label": "couch",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#couch",
+      "parents": [
+        "Furniture"
+      ]
+    },
+    {
+      "id": "cup",
+      "label": "cup",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#cup",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "dining_table",
+      "label": "dining table",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#dining_table",
+      "parents": [
+        "Furniture"
+      ]
+    },
+    {
+      "id": "door",
+      "label": "door",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#door",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "exit_sign",
+      "label": "exit sign",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#exit_sign",
+      "parents": [
+        "SafetyEquipment"
+      ]
+    },
+    {
+      "id": "fire_extinguisher",
+      "label": "fire extinguisher",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#fire_extinguisher",
+      "parents": [
+        "SafetyEquipment"
+      ]
+    },
+    {
+      "id": "fire_hydrant",
+      "label": "fire hydrant",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#fire_hydrant",
+      "parents": [
+        "SafetyEquipment"
+      ]
+    },
+    {
+      "id": "fork",
+      "label": "fork",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#fork",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "glove",
+      "label": "glove",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#glove",
+      "parents": [
+        "SafetyEquipment"
+      ]
+    },
+    {
+      "id": "hair_net",
+      "label": "hair net",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hair_net",
+      "parents": [
+        "SafetyEquipment"
+      ]
+    },
+    {
+      "id": "handbag",
+      "label": "handbag",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#handbag",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "healthcare_worker",
+      "label": "healthcare worker",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#healthcare_worker",
+      "parents": [
+        "Staff"
+      ]
+    },
+    {
+      "id": "hospital_bed",
+      "label": "hospital bed",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hospital_bed",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "hospital_stretcher",
+      "label": "hospital stretcher",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hospital_stretcher",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "infusion_pump",
+      "label": "infusion pump",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#infusion_pump",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "iv_bag",
+      "label": "iv bag",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#iv_bag",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "iv_stand",
+      "label": "iv stand",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#iv_stand",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "knife",
+      "label": "knife",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#knife",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "mask",
+      "label": "mask",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#mask",
+      "parents": [
+        "SafetyEquipment"
+      ]
+    },
+    {
+      "id": "monitor_hosp",
+      "label": "monitor hosp",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#monitor_hosp",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "nasal_cannula",
+      "label": "nasal cannula",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#nasal_cannula",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "patient_monitor",
+      "label": "patient monitor",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#patient_monitor",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "person",
+      "label": "person",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#person",
+      "parents": [
+        "Person"
+      ]
+    },
+    {
+      "id": "radiator",
+      "label": "radiator",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#radiator",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "reception_counter",
+      "label": "reception counter",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#reception_counter",
+      "parents": [
+        "Furniture"
+      ]
+    },
+    {
+      "id": "refrigerator",
+      "label": "refrigerator",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#refrigerator",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "scissors",
+      "label": "scissors",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#scissors",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "security_camera",
+      "label": "security camera",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#security_camera",
+      "parents": [
+        "SafetyEquipment"
+      ]
+    },
+    {
+      "id": "sink",
+      "label": "sink",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#sink",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "spillage",
+      "label": "spillage",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#spillage",
+      "parents": [
+        "HazardEvent"
+      ]
+    },
+    {
+      "id": "spoon",
+      "label": "spoon",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#spoon",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "suitcase",
+      "label": "suitcase",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#suitcase",
+      "parents": [
+        "PersonalBelonging"
+      ]
+    },
+    {
+      "id": "surgical_light",
+      "label": "surgical light",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#surgical_light",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "surgical_scissor",
+      "label": "surgical scissor",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#surgical_scissor",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "test_tube",
+      "label": "test tube",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#test_tube",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "toilet",
+      "label": "toilet",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#toilet",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "vending_machines",
+      "label": "vending machines",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#vending_machines",
+      "parents": [
+        "Furniture"
+      ]
+    },
+    {
+      "id": "wheelchair",
+      "label": "wheelchair",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#wheelchair",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "door",
+      "label": "door",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#door",
+      "parents": []
+    },
+    {
+      "id": "exit_sign",
+      "label": "exit sign",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#exit_sign",
+      "parents": []
+    },
+    {
+      "id": "small_bin",
+      "label": "small bin",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#small_bin",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "large_bin",
+      "label": "large bin",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#large_bin",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "oxygen_pump",
+      "label": "oxygen pump",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#oxygen_pump",
+      "parents": []
+    },
+    {
+      "id": "oxygen_cylinder",
+      "label": "oxygen cylinder",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#oxygen_cylinder",
+      "parents": [
+        "MedicalDevice"
+      ]
+    },
+    {
+      "id": "wheelchair_manual",
+      "label": "wheelchair manual",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#wheelchair_manual",
+      "parents": [
+        "wheelchair"
+      ]
+    },
+    {
+      "id": "wheelchair_powered",
+      "label": "wheelchair powered",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#wheelchair_powered",
+      "parents": [
+        "wheelchair"
+      ]
+    },
+    {
+      "id": "security_camera_dome",
+      "label": "security camera dome",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#security_camera_dome",
+      "parents": [
+        "security_camera"
+      ]
+    },
+    {
+      "id": "security_camera_bullet",
+      "label": "security camera bullet",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#security_camera_bullet",
+      "parents": [
+        "security_camera"
+      ]
+    },
+    {
+      "id": "power_socket",
+      "label": "power socket",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#power_socket",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "surgical_light",
+      "label": "surgical light",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#surgical_light",
+      "parents": []
+    },
+    {
+      "id": "hand_sanitizer",
+      "label": "hand sanitizer",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hand_sanitizer",
+      "parents": [
+        "Infrastructure"
+      ]
+    },
+    {
+      "id": "radiator",
+      "label": "radiator",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#radiator",
+      "parents": []
+    },
+    {
+      "id": "infusion_pump",
+      "label": "infusion pump",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#infusion_pump",
+      "parents": []
+    },
+    {
+      "id": "glove",
+      "label": "glove",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#glove",
+      "parents": []
+    },
+    {
+      "id": "mask",
+      "label": "mask",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#mask",
+      "parents": []
+    },
+    {
+      "id": "hair_net",
+      "label": "hair net",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hair_net",
+      "parents": []
+    },
+    {
+      "id": "hospital_stretcher",
+      "label": "hospital stretcher",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#hospital_stretcher",
+      "parents": []
+    },
+    {
+      "id": "knife",
+      "label": "knife",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#knife",
+      "parents": []
+    },
+    {
+      "id": "iv_stand",
+      "label": "iv stand",
+      "uri": "http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#iv_stand",
+      "parents": []
+    }
+  ],
+  "properties": [
+    {
+      "id": "causes",
+      "label": "causes",
+      "type": "object",
+      "domain": "HazardEvent",
+      "range": "Hazard"
+    },
+    {
+      "id": "hasObject",
+      "label": "has Object",
+      "type": "object",
+      "domain": "Statement",
+      "range": ""
+    },
+    {
+      "id": "hasPredicate",
+      "label": "has Predicate",
+      "type": "object",
+      "domain": "Statement",
+      "range": "Predicate"
+    },
+    {
+      "id": "hasSubject",
+      "label": "has Subject",
+      "type": "object",
+      "domain": "Statement",
+      "range": ""
+    },
+    {
+      "id": "isEvidenceFor",
+      "label": "is Evidence For",
+      "type": "object",
+      "domain": "Statement",
+      "range": "Role"
+    },
+    {
+      "id": "blocks",
+      "label": "blocks",
+      "type": "object",
+      "domain": "",
+      "range": ""
+    },
+    {
+      "id": "existsIn",
+      "label": "exists In",
+      "type": "object",
+      "domain": "PhysicalObject",
+      "range": "Context"
+    },
+    {
+      "id": "hasLocation",
+      "label": "has Location",
+      "type": "object",
+      "domain": "",
+      "range": "Location"
+    },
+    {
+      "id": "involves",
+      "label": "involves",
+      "type": "object",
+      "domain": "Event",
+      "range": "Person"
+    },
+    {
+      "id": "isAt",
+      "label": "is At",
+      "type": "object",
+      "domain": "Role",
+      "range": "Location"
+    },
+    {
+      "id": "isDeterminedBy",
+      "label": "is Determined By",
+      "type": "object",
+      "domain": "Role",
+      "range": "Context"
+    },
+    {
+      "id": "playsRole",
+      "label": "plays Role",
+      "type": "object",
+      "domain": "",
+      "range": "Role"
+    },
+    {
+      "id": "threatens",
+      "label": "threatens",
+      "type": "object",
+      "domain": "Hazard",
+      "range": "Person"
+    },
+    {
+      "id": "triggersAlert",
+      "label": "triggers Alert",
+      "type": "object",
+      "domain": "",
+      "range": "Alert"
+    },
+    {
+      "id": "detectedAt",
+      "label": "detected At",
+      "type": "datatype",
+      "domain": "Statement",
+      "range": "dateTime"
+    },
+    {
+      "id": "hasConfidence",
+      "label": "has Confidence",
+      "type": "datatype",
+      "domain": "Statement",
+      "range": "float"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 150" role="img" aria-labelledby="title desc">
+  <title id="title">Resilient Enterprise</title>
+  <desc id="desc">Resilient Enterprise research logo</desc>
+  <rect width="130" height="150" rx="5" fill="#ff553b"/><path d="M42 48c0-18 16-32 35-32s35 14 35 32v17c0 18-16 32-35 32S42 83 42 65Z" fill="none" stroke="#fff" stroke-width="7"/><circle cx="77" cy="48" r="8" fill="#fff"/><path d="M22 111h53M22 127h38" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+  <text x="150" y="65" fill="#3c3a35" font-family="Arial,sans-serif" font-size="45" letter-spacing="4">resilient</text><text x="150" y="119" fill="#3c3a35" font-family="Arial,sans-serif" font-size="45" letter-spacing="2">enterprise</text>
+</svg>
