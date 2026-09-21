@@ -36,7 +36,8 @@ DEFAULT_VIDEO   = REPO_ROOT / "10_Testing/Rules for AD/Person_blocking_hospital_
 OUT_DIR         = REPO_ROOT / "04_outputs_runs_and_logs/AD_Rules_Outputs"
 
 # ── DINO settings ─────────────────────────────────────────────────────────────
-DINO_MODEL_ID   = "IDEA-Research/grounding-dino-base"
+LOCAL_DINO_PATH = BASE_DIR.parent / "v3" / "model" / "grounding-dino-base"
+DINO_MODEL_ID   = str(LOCAL_DINO_PATH) if LOCAL_DINO_PATH.exists() else "IDEA-Research/grounding-dino-base"
 
 # Separate prompts — mixing them in one string dilutes confidence scores
 DINO_TEXT_DOOR  = "hospital corridor door."
