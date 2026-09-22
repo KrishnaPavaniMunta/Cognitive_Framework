@@ -233,7 +233,7 @@ Run the focused ontology and semantic-map viewer tests:
   -m unittest ".\10_Testing\test_ontology_semantic_map_viewer.py" -v
 ```
 
-## Recommended GitHub Navigation For Reviewers
+## Recommended GitHub Navigation
 
 Start here:
 
