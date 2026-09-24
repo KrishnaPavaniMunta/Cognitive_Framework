@@ -254,7 +254,7 @@ def main():
     )
     
     st.markdown('<div class="viewer-frame">', unsafe_allow_html=True)
-    st.iframe(viewer_url, height=560, scrolling=False)
+    st.iframe(viewer_url, height=560)
     st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown("<div style='margin-top: 18px;'></div>", unsafe_allow_html=True)
