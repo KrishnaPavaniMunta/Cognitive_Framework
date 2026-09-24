@@ -30,13 +30,15 @@ class ExitObstructionResult:
     door_shape_obstruction: bool = False
     floor_y: float | None = None
     floor_world_z: float | None = None
+    zone_radius_m: float = 1.0
     door_confirmed: bool = False
     zone_strips_world: list[list[list[float]]] = field(default_factory=list)
     blockers: list[dict[str, Any]] = field(default_factory=list)
+    landmark_detections: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def obstruction_flag(self) -> bool:
-        return self.door_shape_obstruction or bool(self.blockers)
+        return bool(self.blockers)
 
 
 def point_inside_keep_clear_zone(
@@ -133,6 +135,7 @@ class ExitObstructionMonitor:
         self._device = ""
         self._door_state: dict[str, Any] = {}
         self._object_state: dict[str, Any] = {}
+        self._sign_state: dict[str, Any] = {}
         self._held_door_boxes: list[tuple] = []
         self._held_door_age = 10**9
         self._door_hits = 0
@@ -167,18 +170,20 @@ class ExitObstructionMonitor:
         processor = legacy.det.AutoProcessor.from_pretrained(legacy.det.DINO_MODEL_ID)
         dino = legacy.det.AutoModelForZeroShotObjectDetection.from_pretrained(legacy.det.DINO_MODEL_ID).to(device)
         dino.eval()
-        sam = None
-        if self.use_sam:
-            sam = legacy.det.GroundedSAMRefiner(
-                ckpt_path=legacy.det.SAM_CKPT_PATH,
-                model_type="vit_h",
-                device=device,
-            )
+        
+        # ALWAYS load SAM because the door locking mechanism requires it
+        sam = legacy.det.GroundedSAMRefiner(
+            ckpt_path=legacy.det.SAM_CKPT_PATH,
+            model_type="vit_h",
+            device=device,
+        )
+            
         self._legacy = legacy
         self._models = {"v1": v1, "v3": v3, "proc": processor, "dino": dino, "sam": sam}
         self._device = device
         self._door_state = {"held_doors": [], "held_age": legacy.HOLD_FRAMES + 1}
         self._object_state = {"held_objs": [], "held_age": legacy.HOLD_FRAMES + 1}
+        self._sign_state = {"held_signs": [], "held_age": legacy.HOLD_FRAMES + 1}
         self._held_door_boxes = []
         self._held_door_age = legacy.HOLD_FRAMES + 1
 
@@ -196,9 +201,10 @@ class ExitObstructionMonitor:
             "rotation": np.asarray(pose_matrix, dtype=np.float64)[:3, :3],
             "top_z": float(floor_world[2] + door_height),
             "bottom_z": float(floor_world[2]),
+            "radius": float(result.zone_radius_m),
         }
         result.floor_world_z = float(floor_world[2])
-        result.zone_strips_world = world_keep_clear_strips(result, pose_matrix, self.radius_m)
+        result.zone_strips_world = world_keep_clear_strips(result, pose_matrix, result.zone_radius_m)
         self._world_anchor["strips"] = result.zone_strips_world
 
     def _floor_y(self, depth_mm: np.ndarray, intrinsics, point_xyz: tuple[float, float, float]) -> float | None:
@@ -218,40 +224,61 @@ class ExitObstructionMonitor:
         assert self._legacy is not None and self._models is not None
         legacy = self._legacy
         height, width = rgb_bgr.shape[:2]
-        if self.use_sam:
-            doors = legacy.dz._detect_door_mask(
-                rgb_bgr,
-                frame_index,
-                {"yolo": self._models["v3"], "proc": self._models["proc"], "dino": self._models["dino"], "sam": self._models["sam"]},
-                self._door_state,
-                self._device,
+
+        # 1. ALWAYS delegate to door_zone_rgbd to lock the door (uses SAM + hold logic)
+        doors = legacy.dz._detect_door_mask(
+            rgb_bgr,
+            frame_index,
+            {"yolo": self._models["v3"], "proc": self._models["proc"], "dino": self._models["dino"], "sam": self._models["sam"]},
+            self._door_state,
+            self._device,
+        )
+
+        # Reuse the V1 door/sign cadence so specialized exit detections can also
+        # enter the normal semantic-map landmark pipeline.
+        _, yolo_sign_boxes = legacy.det.yolo_detect(self._models["v3"], rgb_bgr, self._device)
+        run_dino_now = (frame_index > 1) and ((frame_index - 1) % legacy.DINO_INTERVAL == 0)
+        if run_dino_now:
+            _, dino_sign_boxes = legacy.det.dino_detect(
+                self._models["proc"], self._models["dino"], rgb_bgr, self._device
             )
+            sign_proposals = legacy.det._nms_merge(yolo_sign_boxes + dino_sign_boxes, iou_thr=0.30)
+            self._sign_state["held_signs"] = sorted(sign_proposals, key=lambda item: item[4], reverse=True)[:4]
+            self._sign_state["held_age"] = 0
+        else:
+            self._sign_state["held_age"] += 1
+        signs = (
+            self._sign_state["held_signs"]
+            if self._sign_state["held_age"] <= legacy.HOLD_FRAMES
+            else []
+        )
+
+        # 2. Use YOLO + DINO ensemble strictly for objects 
+        # (Doors and signs are ALREADY filtered by legacy._is_obstruction_label)
+        if self.use_sam:
             objects = legacy._detect_obstruction_masks(
                 rgb_bgr, frame_index, self._models, self._object_state, self._device
             )
         else:
-            door_boxes, _ = legacy.det.yolo_detect(self._models["v3"], rgb_bgr, self._device)
-            object_boxes = legacy._yolo_non_door_boxes(
-                self._models["v1"], self._models["v3"], rgb_bgr, self._device
-            )
-            if frame_index > 1 and (frame_index - 1) % legacy.DINO_INTERVAL == 0:
-                dino_doors, _ = legacy.det.dino_detect(
-                    self._models["proc"], self._models["dino"], rgb_bgr, self._device
-                )
-                door_boxes = legacy.det._nms_merge(door_boxes + dino_doors, iou_thr=0.30)
-                dino_objects = legacy._dino_non_door_boxes(
-                    self._models["proc"], self._models["dino"], rgb_bgr, self._device
-                )
-                object_boxes = legacy.det._nms_merge(object_boxes + dino_objects, iou_thr=0.30)
-            if door_boxes:
-                self._held_door_boxes = door_boxes[:2]
-                self._held_door_age = 0
+            # YOLO + DINO ensemble generating bounding boxes ONLY (no SAM for objects)
+            yolo_obj_boxes = legacy._yolo_non_door_boxes(self._models["v1"], self._models["v3"], rgb_bgr, self._device)
+            
+            run_dino_now = (frame_index > 1) and ((frame_index - 1) % legacy.DINO_INTERVAL == 0)
+            if run_dino_now:
+                dino_obj_boxes = legacy._dino_non_door_boxes(self._models["proc"], self._models["dino"], rgb_bgr, self._device)
+                proposals = legacy.det._nms_merge(yolo_obj_boxes + dino_obj_boxes, iou_thr=0.30)
+                proposals = sorted(proposals, key=lambda d: d[4], reverse=True)[:legacy.MAX_OBJ_PROPOSALS]
+                self._object_state["held_objs"] = proposals
+                self._object_state["held_age"] = 0
             else:
-                self._held_door_age += 1
-            doors = self._held_door_boxes if self._held_door_age <= legacy.HOLD_FRAMES else []
-            objects = object_boxes
-        result = ExitObstructionResult()
+                self._object_state["held_age"] += 1
+
+            objects = self._object_state["held_objs"] if self._object_state["held_age"] <= legacy.HOLD_FRAMES else []
+
+        result = ExitObstructionResult(zone_radius_m=self.radius_m)
         detected_geometry = None
+        door_landmark_uv: tuple[float, float] | None = None
+        door_landmark_depth_m: float | None = None
 
         if doors:
             door = max(doors, key=lambda item: item[4])
@@ -265,14 +292,25 @@ class ExitObstructionMonitor:
                 centroid = legacy.dz._mask_centroid(door_mask)
                 depth_m = legacy.dz._median_depth_m(depth_mm, door_mask)
                 if centroid is not None and depth_m is not None and depth_m > 0.0:
+                    door_landmark_uv = (float(centroid[0]), float(centroid[1]))
+                    door_landmark_depth_m = float(depth_m)
                     center_x, center_y, center_z = legacy.dz._backproject(*centroid, depth_m, intrinsics)
                     _, top_y, _ = legacy.dz._backproject(centroid[0], float(door[1]), depth_m, intrinsics)
                     _, bottom_y, _ = legacy.dz._backproject(centroid[0], float(door[3]), depth_m, intrinsics)
                     door_height = abs(bottom_y - top_y)
+                    left_x, _, _ = legacy.dz._backproject(float(door[0]), centroid[1], depth_m, intrinsics)
+                    right_x, _, _ = legacy.dz._backproject(float(door[2]), centroid[1], depth_m, intrinsics)
+                    dynamic_radius = max(0.01, abs(right_x - left_x) / 2.0)
                     floor_y = self._floor_y(depth_mm, intrinsics, (center_x, center_y, center_z))
                     bottom_y = floor_y if floor_y is not None else center_y + door_height / 2.0
                     top_y = bottom_y - door_height
-                    detected_geometry = ((center_x, center_y, center_z), top_y, bottom_y, floor_y)
+                    detected_geometry = (
+                        (center_x, center_y, center_z),
+                        top_y,
+                        bottom_y,
+                        floor_y,
+                        dynamic_radius,
+                    )
 
         if detected_geometry is not None:
             if self._candidate_geometry is not None:
@@ -292,15 +330,37 @@ class ExitObstructionMonitor:
             self._door_hits = 0
 
         geometry = self._stable_geometry
+        result.landmark_detections.extend(
+            {
+                "bbox_xyxy": [float(value) for value in sign[:4]],
+                "class_label": "exit_sign",
+                "confidence": float(sign[4]),
+            }
+            for sign in signs
+        )
         if geometry is None:
             return result
-        result.door_camera_xyz, result.door_top_y, result.door_bottom_y, result.floor_y = geometry
+        result.door_camera_xyz, result.door_top_y, result.door_bottom_y, result.floor_y, result.zone_radius_m = geometry
         result.door_confirmed = True
 
         if pose_matrix is not None and self._world_anchor is None:
             self.set_world_anchor(pose_matrix, result)
         if self._world_anchor is not None:
+            result.zone_radius_m = float(self._world_anchor["radius"])
             result.zone_strips_world = self._world_anchor["strips"]
+
+        if doors:
+            door = max(doors, key=lambda item: item[4])
+            door_landmark = {
+                "bbox_xyxy": [float(value) for value in door[:4]],
+                "class_label": "door",
+                "confidence": float(door[4]),
+                "center_uv": door_landmark_uv,
+                "depth_m": door_landmark_depth_m,
+            }
+            if self._world_anchor is not None:
+                door_landmark["world_xyz"] = tuple(float(value) for value in self._world_anchor["center"])
+            result.landmark_detections.append(door_landmark)
 
         for object_index, detection in enumerate(objects, start=1):
             object_mask = legacy.dz._mask_from_det(detection, (height, width))
@@ -316,7 +376,7 @@ class ExitObstructionMonitor:
                     depth_mm,
                     intrinsics,
                     result.door_camera_xyz,
-                    self.radius_m,
+                    result.zone_radius_m,
                     result.door_top_y,
                     result.door_bottom_y,
                 )
@@ -361,12 +421,17 @@ class ExitObstructionMonitor:
             (world[:, 2] >= min(anchor["top_z"], anchor["bottom_z"]))
             & (world[:, 2] <= max(anchor["top_z"], anchor["bottom_z"]))
             & ((horizontal @ forward) <= 0.0)
-            & (np.sum(horizontal * horizontal, axis=1) <= self.radius_m ** 2)
+            & (np.sum(horizontal * horizontal, axis=1) <= anchor["radius"] ** 2)
         ))
 
     def draw_overlay(self, frame: np.ndarray, result: ExitObstructionResult, intrinsics, pose_matrix=None) -> np.ndarray:
         """Draw the keep-clear zone, blockers, and operator-facing alert on a video frame."""
         image = frame.copy()
+        
+        # We now check bool(result.blockers) instead of result.obstruction_flag 
+        # so shape distortion no longer triggers the red visual alerts.
+        has_physical_blockers = bool(result.blockers)
+        
         if result.zone_strips_world and pose_matrix is not None:
             camera_from_world = np.linalg.inv(np.asarray(pose_matrix, dtype=np.float64))
             projected_strips = []
@@ -381,7 +446,8 @@ class ExitObstructionMonitor:
                     projected_strips.append(np.asarray(pixels, dtype=np.int32))
             if projected_strips:
                 overlay = image.copy()
-                color = (0, 0, 220) if result.obstruction_flag else (0, 180, 60)
+                # Zone turns red ONLY if there are physical blockers
+                color = (0, 0, 220) if has_physical_blockers else (0, 180, 60)
                 for strip in projected_strips:
                     cv2.polylines(overlay, [strip], False, color, 2)
                 cv2.addWeighted(overlay, 0.15, image, 0.85, 0.0, image)
@@ -391,16 +457,20 @@ class ExitObstructionMonitor:
             image = self._legacy.dz._draw_zone(
                 image,
                 result.door_camera_xyz,
-                self.radius_m,
+                result.zone_radius_m,
                 result.door_bottom_y,
                 result.door_top_y,
                 intrinsics,
             )
+            
         for blocker in result.blockers:
             x1, y1, x2, y2 = (int(round(value)) for value in blocker["bbox_xyxy"])
             cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 255), 3)
             cv2.putText(image, "BLOCKING EXIT", (x1, max(22, y1 - 7)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2, cv2.LINE_AA)
-        if result.obstruction_flag:
+            
+        # Banner appears ONLY if there are physical blockers
+        if has_physical_blockers:
             cv2.rectangle(image, (0, 30), (image.shape[1], 72), (0, 0, 180), -1)
             cv2.putText(image, "EXIT BLOCKED", (12, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3, cv2.LINE_AA)
+            
         return image

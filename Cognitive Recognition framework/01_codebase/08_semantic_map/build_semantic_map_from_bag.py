@@ -906,7 +906,9 @@ def main() -> None:
 
             exit_result = None
             if exit_monitor is not None:
-                exit_result = exit_monitor.evaluate(rgb_img, depth_mm, intr, processed_counter)
+                exit_result = exit_monitor.evaluate(
+                    rgb_img, depth_mm, intr, processed_counter, pose_matrix=pose_matrix
+                )
                 door_world_xyz = (
                     transform_point(pose_matrix, exit_result.door_camera_xyz)
                     if pose_matrix is not None and exit_result.door_camera_xyz is not None
@@ -919,10 +921,16 @@ def main() -> None:
                     world_frame if pose_matrix is not None else None,
                     exit_result,
                     door_world_xyz,
-                    args.exit_keep_clear_radius_m,
+                    exit_result.zone_radius_m,
                 )
                 stats["egress_frames_evaluated"] += 1
                 stats["egress_blocked_frames"] += int(exit_result.obstruction_flag)
+                specialized_labels = {"door", "exit_sign"}
+                detections = [
+                    detection for detection in detections
+                    if str(detection.get("class_label", "")).strip().lower() not in specialized_labels
+                ]
+                detections.extend(exit_result.landmark_detections)
 
             LOG.debug(
                 "[FRAME %05d] t=%.3fs depth_dt=%.1fms dets=%d tf=%s (%s)",
@@ -935,6 +943,7 @@ def main() -> None:
             for det in detections:
                 x1, y1, x2, y2 = det["bbox_xyxy"]
                 source_class_name = det["class_label"]
+                center_uv = det.get("center_uv") or ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
                 class_name = db.map_class_name(source_class_name)
                 conf = det.get("confidence")
                 class_histogram[source_class_name] = class_histogram.get(source_class_name, 0) + 1
@@ -946,8 +955,8 @@ def main() -> None:
                     "source_class_name": source_class_name,
                     "confidence": conf,
                     "bbox_xyxy": [x1, y1, x2, y2],
-                    "u": (x1 + x2) / 2.0,
-                    "v": (y1 + y2) / 2.0,
+                    "u": float(center_uv[0]),
+                    "v": float(center_uv[1]),
                     "depth_m": 0.0,
                     "cam_X": 0.0, "cam_Y": 0.0, "cam_Z": 0.0,
                     "world_X": None, "world_Y": None, "world_Z": None,
@@ -960,8 +969,6 @@ def main() -> None:
 
                 if class_name in excluded_classes:
                     stats["rejected_excluded_class"] += 1
-                    pin["reject_reason"] = "excluded class"
-                    pins.append(pin)
                     continue
 
                 if conf is not None and conf < args.min_confidence:
@@ -971,7 +978,9 @@ def main() -> None:
                     continue
 
                 # Step 2
-                z_m = sample_depth_m(depth_mm, int(round(pin["u"])), int(round(pin["v"])))
+                z_m = det.get("depth_m") or sample_depth_m(
+                    depth_mm, int(round(pin["u"])), int(round(pin["v"]))
+                )
                 if z_m is None:
                     stats["rejected_no_depth_value"] += 1
                     pin["reject_reason"] = "no valid depth"
@@ -994,7 +1003,10 @@ def main() -> None:
                     continue
 
                 # Step 4
-                wx, wy, wz = transform_point(pose_matrix, (cx, cy, cz))
+                if det.get("world_xyz") is not None:
+                    wx, wy, wz = (float(value) for value in det["world_xyz"])
+                else:
+                    wx, wy, wz = transform_point(pose_matrix, (cx, cy, cz))
                 world_frame_seen.add(world_frame)
                 pin["world_X"], pin["world_Y"], pin["world_Z"] = wx, wy, wz
                 pin["world_frame"] = world_frame
@@ -1023,6 +1035,8 @@ def main() -> None:
                 if scene is not None:
                     scene.log_frame(processed_counter, rgb_item.timestamp_ns,
                                     rgb_img, depth_mm, intr, pose_matrix, detections=pins)
+                    if exit_result is not None:
+                        scene.log_exit_zone(exit_result, exit_result.zone_radius_m)
 
             annotated = annotate(rgb_img, processed_counter, rgb_item.timestamp_ns,
                                  pins, len(db.landmarks), extrinsics_status)

@@ -156,6 +156,9 @@ def read_intrinsics(
         conn = sqlite3.connect(str(db3))
         try:
             cur = conn.cursor()
+            tables = {row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not {"topics", "messages"}.issubset(tables):
+                continue
             topics = {
                 int(topic_id): (name, msgtype)
                 for topic_id, name, msgtype in cur.execute("SELECT id, name, type FROM topics")
@@ -206,6 +209,10 @@ def iter_rgbd_frames(
         conn = sqlite3.connect(str(db3))
         try:
             cur = conn.cursor()
+            tables = {row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not {"topics", "messages"}.issubset(tables):
+                topic_map_by_db.append({})
+                continue
             topic_map = {
                 int(topic_id): (name, msgtype)
                 for topic_id, name, msgtype in cur.execute("SELECT id, name, type FROM topics")

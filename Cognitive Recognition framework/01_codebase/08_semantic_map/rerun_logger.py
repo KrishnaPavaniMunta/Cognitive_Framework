@@ -252,6 +252,27 @@ class RerunSceneLogger:
             return
         log_landmark_entities(landmarks, size_lookup=size_lookup)
 
+    def log_exit_zone(self, result, radius_m: float) -> None:
+        """Log the current V2 keep-clear zone and blocked state in world coordinates."""
+        strips = getattr(result, "zone_strips_world", None) or []
+        if not strips:
+            return
+        line_strips = [np.asarray(strip, dtype=np.float32) for strip in strips]
+        color = [220, 40, 40] if result.obstruction_flag else [40, 190, 80]
+        rr.log(
+            "world/exit_zone",
+            rr.LineStrips3D(
+                line_strips,
+                colors=[color] * len(line_strips),
+                radii=0.025,
+            ),
+            rr.AnyValues(
+                door_confirmed=bool(result.door_confirmed),
+                obstruction_flag=bool(result.obstruction_flag),
+                radius_m=float(radius_m),
+            ),
+        )
+
     def finish(self) -> None:
         if len(self.trajectory) >= 2:
             rr.log(
