@@ -39,15 +39,17 @@ st.markdown(
     """
     <style>
     .block-container {
-        padding-top: 1.5rem;
+        padding-top: 1.2rem;
         padding-bottom: 2rem;
-        max-width: 1250px;
+        padding-left: clamp(1rem, 3vw, 2.5rem);
+        padding-right: clamp(1rem, 3vw, 2.5rem);
+        max-width: 100% !important;
     }
     .header-card {
         background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
-        padding: 20px 24px;
+        padding: 18px 24px;
         text-align: center;
         margin-bottom: 16px;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
@@ -58,14 +60,6 @@ st.markdown(
         overflow: hidden;
         background: #0f172a;
         box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-    }
-    .card-box {
-        background: #1e293b;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 12px;
-        padding: 20px;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
-        min-height: 180px;
     }
     .status-clear {
         background: rgba(16, 185, 129, 0.12);
@@ -254,26 +248,25 @@ def main():
     )
     
     st.markdown('<div class="viewer-frame">', unsafe_allow_html=True)
-    st.iframe(viewer_url, height=560)
+    st.iframe(viewer_url, height=580, width="stretch")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    st.markdown("<div style='margin-top: 18px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
 
     # ── Bottom Row: Clean Two-Column Controls & Status ─────────────────────────
-    col_alert, col_slider = st.columns([1.3, 1.0], gap="large")
+    col_alert, col_slider = st.columns([1.2, 1.0], gap="medium")
 
     with col_slider:
-        st.markdown('<div class="card-box">', unsafe_allow_html=True)
-        st.markdown("<h3 style='margin-top:0;'>📏 Required Clear Distance</h3>", unsafe_allow_html=True)
-        st.write("Adjust the required safety distance in front of the door:")
-        
-        custom_radius = st.slider(
-            "Clearance distance (meters)", 
-            min_value=0.40, max_value=3.50, 
-            value=float(round(detected_radius, 2)), step=0.05,
-            help="Move this slider to change how much space must remain clear in front of the door.",
-        )
-        st.markdown('</div>', unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown("<h3 style='margin-top:0; font-size: 19px;'>📏 Required Clear Distance</h3>", unsafe_allow_html=True)
+            st.write("Adjust the required safety distance in front of the door:")
+            
+            custom_radius = st.slider(
+                "Clearance distance (meters)", 
+                min_value=0.40, max_value=3.50, 
+                value=float(round(detected_radius, 2)), step=0.05,
+                help="Move this slider to change how much space must remain clear in front of the door.",
+            )
 
     # Evaluate Collisions
     hits = find_blockers(landmarks, center, forward, custom_radius, bottom_z, top_z)
@@ -290,41 +283,40 @@ def main():
     )
 
     with col_alert:
-        st.markdown('<div class="card-box">', unsafe_allow_html=True)
-        st.markdown("<h3 style='margin-top:0;'>🛡️ Exit Door Status</h3>", unsafe_allow_html=True)
-        
-        if hits:
-            blocker_names = ", ".join([f"**{h['class_name'].replace('_', ' ').title()} #{h['instance_id']}**" for h in hits])
-            st.markdown(
-                f"""
-                <div class="status-blocked">
-                    <div style="color: #ef4444; font-size: 18px; font-weight: 700; margin-bottom: 6px;">
-                        🚨 Exit is Blocked!
+        with st.container(border=True):
+            st.markdown("<h3 style='margin-top:0; font-size: 19px;'>🛡️ Exit Door Status</h3>", unsafe_allow_html=True)
+            
+            if hits:
+                blocker_names = ", ".join([f"**{h['class_name'].replace('_', ' ').title()} #{h['instance_id']}**" for h in hits])
+                st.markdown(
+                    f"""
+                    <div class="status-blocked">
+                        <div style="color: #ef4444; font-size: 18px; font-weight: 700; margin-bottom: 6px;">
+                            🚨 Exit is Blocked!
+                        </div>
+                        <div style="color: #fca5a5; font-size: 14px;">
+                            <b>{len(hits)} obstacle(s)</b> are inside the <b>{custom_radius:.2f} meter</b> safety zone:
+                            <br><br>
+                            {blocker_names}
+                        </div>
                     </div>
-                    <div style="color: #fca5a5; font-size: 14px;">
-                        <b>{len(hits)} obstacle(s)</b> are inside the <b>{custom_radius:.2f} meter</b> safety zone:
-                        <br><br>
-                        {blocker_names}
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f"""
+                    <div class="status-clear">
+                        <div style="color: #10b981; font-size: 18px; font-weight: 700; margin-bottom: 6px;">
+                            ✅ Exit is Clear
+                        </div>
+                        <div style="color: #86efac; font-size: 14px;">
+                            No obstacles are blocking the exit door within <b>{custom_radius:.2f} meters</b>.
+                        </div>
                     </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                f"""
-                <div class="status-clear">
-                    <div style="color: #10b981; font-size: 18px; font-weight: 700; margin-bottom: 6px;">
-                        ✅ Exit is Clear
-                    </div>
-                    <div style="color: #86efac; font-size: 14px;">
-                        No obstacles are blocking the exit door within <b>{custom_radius:.2f} meters</b>.
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        st.markdown('</div>', unsafe_allow_html=True)
+                    """,
+                    unsafe_allow_html=True,
+                )
 
 
 if __name__ == "__main__":
