@@ -116,12 +116,26 @@ def rebuild_rerun(map_dir: Path, conn: sqlite3.Connection) -> None:
     if row is None:
         raise RuntimeError("Cannot rebuild point cloud: this map has no completed source-bag run recorded.")
 
+    frame_stride = 1
+    history_dir = map_dir / "run_history"
+    if history_dir.exists():
+        for manifest_path in sorted(history_dir.glob("*.json")):
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                cfg = manifest.get("configuration") or {}
+                if not cfg.get("rerun_only") and int(cfg.get("frame_stride", 0)) > 0:
+                    frame_stride = int(cfg["frame_stride"])
+                    break
+            except Exception:
+                continue
+
     builder = BASE_DIR / "build_semantic_map_from_bag.py"
     command = [
         sys.executable,
         str(builder),
         "--bag", str(row[0]),
         "--out-root", str(map_dir.parent),
+        "--frame-stride", str(frame_stride),
         "--rerun-only",
         "--no-preview",
         "--no-video",

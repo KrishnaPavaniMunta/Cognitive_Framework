@@ -614,15 +614,19 @@ def build_size_lookup():
     try:
         from rgbd_3d_filter import load_dimensions_config
 
-        detector_module = OBJECT_DETECTION_DIR / "YOLO_ensemble+DINO.py"
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location("dims_probe", str(detector_module))
-        probe = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(probe)
-
-        limits = load_dimensions_config(probe.DIMENSIONS_CONFIG_PATH)
-        aliases = probe.CLASS_NAME_ALIAS_CANDIDATES
+        limits = load_dimensions_config(DEFAULT_ONTOLOGY)
+        aliases = {
+            "wheelchair": ["wheelchair_manual", "wheelchair_powered"],
+            "security_camera": ["security_camera_dome", "security_camera_bullet"],
+            "bin": ["small_bin", "large_bin"],
+            "general_bin": ["small_bin", "large_bin"],
+            "yellow_bin": ["small_bin", "large_bin"],
+            "bin_tiger_stripe": ["small_bin", "large_bin"],
+        }
+        fallbacks = {
+            "bottle": (0.12, 0.26),
+            "medical_tray": (0.45, 0.22),
+        }
     except Exception as exc:
         LOG.warning("[RERUN] Could not load object dimensions, using default box size: %s", exc)
         return None
@@ -632,7 +636,7 @@ def build_size_lookup():
             spec = limits.get(candidate)
             if spec:
                 return (spec["min_w"] + spec["max_w"]) / 2.0, (spec["min_h"] + spec["max_h"]) / 2.0
-        return None
+        return fallbacks.get(class_name)
 
     return lookup
 
@@ -766,8 +770,46 @@ def main() -> None:
     db = SemanticMapDB(db_path, args.merge_radius_m, dynamic_classes)
     db.start_run(run_id, bag_path)
     LOG.info("[MAP ] Loaded %d persistent landmarks from %s", len(db.landmarks), db.db_path.name)
+    size_lookup = build_size_lookup()
+    obs_by_ts: dict[int, list[dict[str, Any]]] = {}
     if args.rerun_only:
-        LOG.info("[RERUN] Geometry-only replay: skipping YOLO and DINO inference.")
+        LOG.info("[RERUN] Geometry-only replay: skipping YOLO and DINO inference, using persisted map annotations.")
+        seen_obs: set[tuple[int, int]] = set()
+        for row in db.conn.execute(
+            """
+            SELECT o.timestamp_ns, o.landmark_id, s.class_name, s.instance_id,
+                   o.confidence, o.u, o.v, o.depth_m, o.cam_X, o.cam_Y, o.cam_Z,
+                   o.world_X, o.world_Y, o.world_Z, o.world_frame,
+                   o.extrinsics_source, o.extrinsics_status
+            FROM observations o
+            JOIN semantic_map s ON o.landmark_id = s.landmark_id
+            ORDER BY o.timestamp_ns, o.obs_id DESC
+            """
+        ):
+            ts_ns, lid = int(row[0]), int(row[1])
+            if (ts_ns, lid) in seen_obs:
+                continue
+            seen_obs.add((ts_ns, lid))
+            obs_by_ts.setdefault(ts_ns, []).append(
+                {
+                    "landmark_id": lid,
+                    "class_name": str(row[2]),
+                    "instance_id": int(row[3]),
+                    "confidence": float(row[4] or 0.0),
+                    "u": float(row[5]),
+                    "v": float(row[6]),
+                    "depth_m": float(row[7]),
+                    "cam_X": float(row[8]),
+                    "cam_Y": float(row[9]),
+                    "cam_Z": float(row[10]),
+                    "world_X": float(row[11]) if row[11] is not None else None,
+                    "world_Y": float(row[12]) if row[12] is not None else None,
+                    "world_Z": float(row[13]) if row[13] is not None else None,
+                    "world_frame": row[14],
+                    "extrinsics_source": row[15],
+                    "extrinsics_status": row[16],
+                }
+            )
 
     scene = None
     rrd_path = run_dir / "world_map.rrd"
@@ -940,6 +982,94 @@ def main() -> None:
             )
 
             pins: list[dict[str, Any]] = []
+            if args.rerun_only:
+                seen_lids: set[int] = set()
+                for saved in obs_by_ts.get(rgb_item.timestamp_ns, []):
+                    cls_name = saved["class_name"]
+                    if cls_name in excluded_classes:
+                        continue
+                    seen_lids.add(saved["landmark_id"])
+                    u, v, z_m = saved["u"], saved["v"], max(saved["depth_m"], 0.4)
+                    w_m, h_m = (size_lookup(cls_name) if size_lookup else None) or (0.35, 0.35)
+                    half_w = max(16.0, min(180.0, 0.5 * w_m * intr.fx / z_m))
+                    half_h = max(16.0, min(180.0, 0.5 * h_m * intr.fy / z_m))
+                    x1 = max(0.0, u - half_w)
+                    y1 = max(0.0, v - half_h)
+                    x2 = min(float(intr.width - 1), u + half_w)
+                    y2 = min(float(intr.height - 1), v + half_h)
+                    pins.append(
+                        {
+                            "frame_index": processed_counter,
+                            "timestamp_ns": rgb_item.timestamp_ns,
+                            "class_name": cls_name,
+                            "source_class_name": cls_name,
+                            "confidence": saved["confidence"],
+                            "bbox_xyxy": [x1, y1, x2, y2],
+                            "u": u,
+                            "v": v,
+                            "depth_m": saved["depth_m"],
+                            "cam_X": saved["cam_X"],
+                            "cam_Y": saved["cam_Y"],
+                            "cam_Z": saved["cam_Z"],
+                            "world_X": saved["world_X"],
+                            "world_Y": saved["world_Y"],
+                            "world_Z": saved["world_Z"],
+                            "world_frame": saved["world_frame"] or world_frame,
+                            "instance_id": saved["instance_id"],
+                            "extrinsics_source": saved["extrinsics_source"] or extrinsics_source,
+                            "extrinsics_status": saved["extrinsics_status"] or extrinsics_status,
+                            "reject_reason": "",
+                        }
+                    )
+                if pose_matrix is not None and db.landmarks:
+                    inv_pose = np.linalg.inv(np.asarray(pose_matrix, dtype=np.float64))
+                    for lid, lm in db.landmarks.items():
+                        if lid in seen_lids or lm["class_name"] in excluded_classes:
+                            continue
+                        cam_pt = inv_pose @ np.array([lm["X"], lm["Y"], lm["Z"], 1.0], dtype=np.float64)
+                        cx, cy, cz = float(cam_pt[0]), float(cam_pt[1]), float(cam_pt[2])
+                        if not (0.45 <= cz <= 5.5):
+                            continue
+                        u = float(intr.cx + cx * intr.fx / cz)
+                        v = float(intr.cy + cy * intr.fy / cz)
+                        if not (20.0 <= u < intr.width - 20.0 and 20.0 <= v < intr.height - 20.0):
+                            continue
+                        measured_z = sample_depth_m(depth_mm, int(round(u)), int(round(v)), half=5)
+                        if measured_z is None or abs(measured_z - cz) > 0.55:
+                            continue
+                        cls_name = lm["class_name"]
+                        w_m, h_m = (size_lookup(cls_name) if size_lookup else None) or (0.35, 0.35)
+                        half_w = max(16.0, min(180.0, 0.5 * w_m * intr.fx / cz))
+                        half_h = max(16.0, min(180.0, 0.5 * h_m * intr.fy / cz))
+                        x1 = max(0.0, u - half_w)
+                        y1 = max(0.0, v - half_h)
+                        x2 = min(float(intr.width - 1), u + half_w)
+                        y2 = min(float(intr.height - 1), v + half_h)
+                        mean_conf = lm["conf_sum"] / max(1, lm["hit_count"])
+                        pins.append(
+                            {
+                                "frame_index": processed_counter,
+                                "timestamp_ns": rgb_item.timestamp_ns,
+                                "class_name": cls_name,
+                                "source_class_name": cls_name,
+                                "confidence": mean_conf,
+                                "bbox_xyxy": [x1, y1, x2, y2],
+                                "u": u,
+                                "v": v,
+                                "depth_m": cz,
+                                "cam_X": cx,
+                                "cam_Y": cy,
+                                "cam_Z": cz,
+                                "world_X": lm["X"],
+                                "world_Y": lm["Y"],
+                                "world_Z": lm["Z"],
+                                "world_frame": lm["world_frame"] or world_frame,
+                                "instance_id": lm["instance_id"],
+                                "extrinsics_source": extrinsics_source,
+                                "extrinsics_status": extrinsics_status,
+                                "reject_reason": "",
+                            }
+                        )
             for det in detections:
                 x1, y1, x2, y2 = det["bbox_xyxy"]
                 source_class_name = det["class_label"]

@@ -90,18 +90,18 @@ def newest_run_dir() -> Path | None:
 
 
 @st.cache_data(show_spinner=False)
-def load_map_data(db_path: str):
+def load_map_data(db_path: str, db_mtime: float = 0.0):
     """Load landmarks, door anchor, and door rotation matrix from SQLite."""
     conn = sqlite3.connect(db_path)
     
     landmarks = [
-        {"class_name": r[1], "instance_id": r[2], "X": r[3], "Y": r[4], "Z": r[5]}
+        {"landmark_id": r[0], "class_name": r[1], "instance_id": r[2], "X": r[3], "Y": r[4], "Z": r[5]}
         for r in conn.execute("SELECT landmark_id, class_name, instance_id, X, Y, Z FROM semantic_map")
     ]
     
     door_event = conn.execute(
         """SELECT frame_index, door_world_X, door_world_Y, door_world_Z, 
-                  door_top_cam_Y, door_bottom_cam_Y, zone_radius_m 
+                  door_top_cam_Y, door_bottom_cam_Y, zone_radius_m, timestamp_ns 
            FROM egress_obstruction_events WHERE door_world_X IS NOT NULL 
            ORDER BY frame_index DESC LIMIT 1"""
     ).fetchone()
@@ -109,7 +109,11 @@ def load_map_data(db_path: str):
     matrix_json = None
     if door_event:
         frame_idx = door_event[0]
-        pose_row = conn.execute("SELECT matrix_json FROM camera_poses WHERE frame_index=?", (frame_idx,)).fetchone()
+        timestamp_ns = door_event[7]
+        pose_row = (
+            conn.execute("SELECT matrix_json FROM camera_poses WHERE timestamp_ns=?", (timestamp_ns,)).fetchone()
+            or conn.execute("SELECT matrix_json FROM camera_poses WHERE frame_index=?", (frame_idx,)).fetchone()
+        )
         if pose_row:
             matrix_json = pose_row[0]
             
@@ -205,7 +209,7 @@ def main():
         st.error(f"world_map.rrd not found in {run_dir}.")
         st.stop()
 
-    landmarks, door_event, matrix_json = load_map_data(str(db_path))
+    landmarks, door_event, matrix_json = load_map_data(str(db_path), db_path.stat().st_mtime)
     if not door_event or not matrix_json:
         st.error("No valid door geometry found in this map.")
         st.stop()
