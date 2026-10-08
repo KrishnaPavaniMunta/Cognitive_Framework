@@ -222,7 +222,7 @@ $env:Path = (Resolve-Path ".\07_environment_and_project_meta\.venv-gpu311\Script
   ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.rrd"
 ```
 
-In Rerun, select an entity under `world/landmarks` and inspect ontology metadata in the Data Inspector.
+In Rerun, select an entity under `world/landmarks` to inspect ontology metadata in the Data Inspector. 3D bounding boxes are sized using real camera-measured physical dimensions (with ontology dimensions as fallback), and point clouds include ontology-classified semantic points.
 
 ## Validation
 

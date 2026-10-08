@@ -454,6 +454,22 @@ The current Rerun entity metadata includes readable fields such as:
 
 Raw ontology URI fields are intentionally excluded from the user-facing Rerun metadata.
 
+### 3D Bounding Boxes
+3D bounding boxes (`Boxes3D`) in Rerun prioritize **real physical dimensions measured directly by the RGB-D camera**:
+- In `rgbd_3d_filter.py`, depth point clouds within 2D bounding boxes are projected to 3D and horizontal PCA computes true oriented dimensions (`real_width`, `real_depth`, `real_height`).
+- `build_semantic_map_from_bag.py` tracks and averages real measurements per landmark, storing them in SQLite (`measured_width`, `measured_depth`, `measured_height`).
+- In the ROS world frame ($X$ forward / depth, $Y$ lateral / width, $Z$ vertical / height), box half-sizes are computed as `[depth / 2, width / 2, height / 2]`.
+- When real camera measurements are available, Rerun (`Boxes3D`) and HTML inspect views prioritize them directly over nominal figures.
+- If sensor depth measurements are missing or below threshold ($< 0.02\text{m}$), the system gracefully falls back to ontology typical dimensions or nominal defaults.
+- The entity metadata explicitly records `dimension_source` (`"camera_measured"` vs `"ontology_typical"`) and `measured_width_m`, `measured_depth_m`, `measured_height_m`.
+
+### Semantic Point Cloud Tagging
+The Rerun scene embeds ontology classification directly into 3D points:
+- An `AnnotationContext` is registered at `world`, mapping ontology classes and detector labels to unique numeric class IDs and distinct colors.
+- In `build_semantic_map_from_bag.py`, depth points within 2D detection bounding boxes and matching depth ranges are assigned their corresponding ontology `class_id` in `world/map/cloud_<chunk>`.
+- Semantically identified points are also highlighted in a dedicated semantic layer under `world/map/semantic_cloud_<chunk>`.
+- In `view_semantic_map.py --rerun`, historical observation points under `world/observations` are tagged with ontology class IDs and text labels.
+
 ## 9. Viewers and Tools
 
 ### Protégé

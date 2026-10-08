@@ -15,18 +15,35 @@ PALETTE = [
 
 
 def _landmark_payload(landmark: dict) -> dict:
+    real_w = landmark.get("measured_width") or landmark.get("real_width")
+    real_d = landmark.get("measured_depth") or landmark.get("real_depth")
+    real_h = landmark.get("measured_height") or landmark.get("real_height")
+    has_real = False
+    if real_w is not None and real_h is not None:
+        try:
+            has_real = float(real_w) > 0.02 and float(real_h) > 0.02
+        except (ValueError, TypeError):
+            has_real = False
+
+    map_info = {
+        "Class": landmark["class_name"],
+        "Instance ID": int(landmark["instance_id"]),
+        "Landmark ID": int(landmark["landmark_id"]),
+        "World frame": landmark["world_frame"],
+        "X (m)": landmark["X"],
+        "Y (m)": landmark["Y"],
+        "Z (m)": landmark["Z"],
+        "Last observed": landmark.get("last_seen") or landmark.get("last_seen_ns"),
+        "Dimension source": "camera_measured" if has_real else "ontology_typical",
+    }
+    if has_real:
+        map_info["Measured width (m)"] = round(float(real_w), 3)
+        map_info["Measured depth (m)"] = round(float(real_d), 3) if real_d is not None else round(float(real_w), 3)
+        map_info["Measured height (m)"] = round(float(real_h), 3)
+
     return {
-        "map": {
-            "Class": landmark["class_name"],
-            "Instance ID": int(landmark["instance_id"]),
-            "Landmark ID": int(landmark["landmark_id"]),
-            "World frame": landmark["world_frame"],
-            "X (m)": landmark["X"],
-            "Y (m)": landmark["Y"],
-            "Z (m)": landmark["Z"],
-            "Last observed": landmark.get("last_seen") or landmark.get("last_seen_ns"),
-        },
-        "ontology": landmark["ontology"],
+        "map": map_info,
+        "ontology": landmark.get("ontology", {}),
     }
 
 
@@ -188,7 +205,7 @@ plot.on("plotly_click", event => {
     section("Map Evidence", table(mapRows)) +
         section("Ontology Class", table([["Object class", knowledge.map_class], ...classRows])) +
     section("Hierarchy", hierarchy) +
-        section("Physical Dimensions", table(dimensions)) +
+        section("Physical Dimensions (Ontology Typical)", table(dimensions)) +
     section("Comments", comments) +
     section("RDF Properties", properties);
 });

@@ -138,11 +138,15 @@ def get_oriented_3d_dimensions(depth_mm, x1, y1, x2, y2, intrinsics):
     pts_projected = pts_centered @ eigenvectors
     horizontal_dimensions = np.max(pts_projected, axis=0) - np.min(pts_projected, axis=0)
     extent_width = float(np.max(horizontal_dimensions))
+    extent_depth = float(np.min(horizontal_dimensions))
 
     if extent_width <= 0 or extent_height <= 0:
-        return float(np.max(X) - np.min(X)), extent_height
+        extent_width = float(np.max(X) - np.min(X))
+        extent_depth = float(np.max(Z) - np.min(Z))
+        if extent_width <= 0 or extent_height <= 0:
+            return None
 
-    return extent_width, extent_height
+    return extent_width, extent_depth, extent_height
 
 
 def _fit_plane_from_points(points3d):
@@ -289,7 +293,7 @@ def apply_depth_size_filter(
             filtered.append((x1, y1, x2, y2, conf, name))
             continue
 
-        width_m, height_m = dims_3d
+        width_m, depth_m, height_m = dims_3d
         fits_any = any(
             (
                 width_m >= limits["min_w"] and width_m <= limits["max_w"] and

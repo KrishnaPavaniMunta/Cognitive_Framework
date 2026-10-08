@@ -51,6 +51,7 @@ if str(ONTOLOGY_DIR) not in sys.path:
 
 import rosbag_rgbd_sim_capture as capture  # noqa: E402  (path bootstrap must run first)
 from ontology_knowledge import OntologyKnowledgeBase  # noqa: E402
+from rgbd_3d_filter import get_oriented_3d_dimensions  # noqa: E402
 from tf_tree import TFTree, normalize_frame  # noqa: E402
 
 DEFAULT_OUT_ROOT = PROJECT_ROOT / "04_outputs_runs_and_logs" / "outputs" / "semantic_maps"
@@ -134,7 +135,10 @@ class SemanticMapDB:
                 first_seen_ns INTEGER NOT NULL,
                 last_seen_ns  INTEGER NOT NULL,
                 first_seen    TEXT NOT NULL,
-                last_seen     TEXT NOT NULL
+                last_seen     TEXT NOT NULL,
+                measured_width REAL,
+                measured_depth REAL,
+                measured_height REAL
             );
 
             CREATE TABLE IF NOT EXISTS observations (
@@ -152,7 +156,10 @@ class SemanticMapDB:
                 world_X REAL, world_Y REAL, world_Z REAL,
                 world_frame   TEXT,
                 extrinsics_source TEXT,
-                extrinsics_status TEXT
+                extrinsics_status TEXT,
+                real_width    REAL,
+                real_depth    REAL,
+                real_height   REAL
             );
 
             CREATE INDEX IF NOT EXISTS idx_map_class ON semantic_map(class_name);
@@ -206,6 +213,10 @@ class SemanticMapDB:
                     "UPDATE semantic_map SET instance_id=? WHERE landmark_id=?",
                     (counts[class_name], landmark_id),
                 )
+        if "measured_width" not in columns:
+            self.conn.execute("ALTER TABLE semantic_map ADD COLUMN measured_width REAL")
+            self.conn.execute("ALTER TABLE semantic_map ADD COLUMN measured_depth REAL")
+            self.conn.execute("ALTER TABLE semantic_map ADD COLUMN measured_height REAL")
         self.conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_map_class_instance ON semantic_map(class_name, instance_id)"
         )
@@ -213,19 +224,25 @@ class SemanticMapDB:
         if "source_class_name" not in observation_columns:
             self.conn.execute("ALTER TABLE observations ADD COLUMN source_class_name TEXT")
             self.conn.execute("UPDATE observations SET source_class_name=class_name WHERE source_class_name IS NULL")
+        if "real_width" not in observation_columns:
+            self.conn.execute("ALTER TABLE observations ADD COLUMN real_width REAL")
+            self.conn.execute("ALTER TABLE observations ADD COLUMN real_depth REAL")
+            self.conn.execute("ALTER TABLE observations ADD COLUMN real_height REAL")
         self.conn.commit()
 
     def _load_landmarks(self) -> None:
-        rows = self.conn.execute(
-            """
-            SELECT landmark_id, class_name, instance_id, world_frame, X, Y, Z,
-                   hit_count, mean_confidence, max_confidence, first_seen_ns, last_seen_ns
-            FROM semantic_map
-            """
-        ).fetchall()
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(semantic_map)")}
+        has_measured = "measured_width" in columns
+        select_cols = (
+            "landmark_id, class_name, instance_id, world_frame, X, Y, Z, "
+            "hit_count, mean_confidence, max_confidence, first_seen_ns, last_seen_ns"
+        )
+        if has_measured:
+            select_cols += ", measured_width, measured_depth, measured_height"
+        rows = self.conn.execute(f"SELECT {select_cols} FROM semantic_map").fetchall()
         for row in rows:
-            lid, class_name, instance_id, world_frame, x, y, z, hits, mean_conf, max_conf, first_ns, last_ns = row
-            self._landmarks[int(lid)] = {
+            lid, class_name, instance_id, world_frame, x, y, z, hits, mean_conf, max_conf, first_ns, last_ns = row[:12]
+            record = {
                 "class_name": class_name,
                 "instance_id": int(instance_id),
                 "world_frame": world_frame,
@@ -235,6 +252,13 @@ class SemanticMapDB:
                 "max_confidence": float(max_conf),
                 "first_seen_ns": int(first_ns), "last_seen_ns": int(last_ns),
             }
+            if has_measured and len(row) >= 15:
+                mw, md, mh = row[12], row[13], row[14]
+                record["measured_width"] = float(mw) if mw is not None else None
+                record["measured_depth"] = float(md) if md is not None else None
+                record["measured_height"] = float(mh) if mh is not None else None
+                record["measured_count"] = int(hits) if (mw and mh) else 0
+            self._landmarks[int(lid)] = record
         self._next_id = max(self._landmarks, default=0) + 1
         self._class_remaps = dict(self.conn.execute("SELECT source_class_name, map_class_name FROM class_remaps"))
 
@@ -280,8 +304,9 @@ class SemanticMapDB:
             INSERT INTO observations (
                 landmark_id, frame_index, timestamp_ns, source_class_name, class_name, confidence,
                 u, v, depth_m, cam_X, cam_Y, cam_Z,
-                world_X, world_Y, world_Z, world_frame, extrinsics_source, extrinsics_status
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                world_X, world_Y, world_Z, world_frame, extrinsics_source, extrinsics_status,
+                real_width, real_depth, real_height
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 landmark_id, record["frame_index"], record["timestamp_ns"], record["source_class_name"],
@@ -289,6 +314,7 @@ class SemanticMapDB:
                 record["cam_X"], record["cam_Y"], record["cam_Z"],
                 record["world_X"], record["world_Y"], record["world_Z"],
                 record["world_frame"], record["extrinsics_source"], record["extrinsics_status"],
+                record.get("real_width"), record.get("real_depth"), record.get("real_height"),
             ),
         )
         instance_id = self._landmarks[landmark_id]["instance_id"] if landmark_id is not None else None
@@ -306,6 +332,9 @@ class SemanticMapDB:
                 best_id, best_dist = lid, dist
 
         conf = float(record["confidence"] or 0.0)
+        rw = record.get("real_width")
+        rd = record.get("real_depth")
+        rh = record.get("real_height")
 
         if best_id is not None and best_dist <= self.merge_radius_m:
             lm = self._landmarks[best_id]
@@ -321,9 +350,26 @@ class SemanticMapDB:
             lm["max_confidence"] = max(lm["max_confidence"], conf)
             lm["hit_count"] = n + 1
             lm["last_seen_ns"] = record["timestamp_ns"]
+
+            # Update real measured physical dimensions from camera depth
+            if rw is not None and rh is not None and rw > 0.02 and rh > 0.02:
+                cur_w = lm.get("measured_width")
+                if cur_w is not None and cur_w > 0:
+                    mc = lm.get("measured_count", n)
+                    lm["measured_width"] = (lm["measured_width"] * mc + rw) / (mc + 1)
+                    lm["measured_depth"] = (lm["measured_depth"] * mc + (rd or rw)) / (mc + 1)
+                    lm["measured_height"] = (lm["measured_height"] * mc + rh) / (mc + 1)
+                    lm["measured_count"] = mc + 1
+                else:
+                    lm["measured_width"] = rw
+                    lm["measured_depth"] = rd or rw
+                    lm["measured_height"] = rh
+                    lm["measured_count"] = 1
+
             LOG.debug(
-                "      merged into landmark #%d (%s) d=%.3fm -> (%.3f, %.3f, %.3f) hits=%d",
+                "      merged into landmark #%d (%s) d=%.3fm -> (%.3f, %.3f, %.3f) hits=%d dims=(%.2f, %.2f, %.2f)",
                 best_id, lm["class_name"], best_dist, lm["X"], lm["Y"], lm["Z"], lm["hit_count"],
+                lm.get("measured_width") or 0.0, lm.get("measured_depth") or 0.0, lm.get("measured_height") or 0.0,
             )
             return best_id
 
@@ -344,6 +390,10 @@ class SemanticMapDB:
             "max_confidence": conf,
             "first_seen_ns": record["timestamp_ns"],
             "last_seen_ns": record["timestamp_ns"],
+            "measured_width": rw if (rw and rw > 0.02) else None,
+            "measured_depth": rd if (rd and rd > 0.02) else (rw if (rw and rw > 0.02) else None),
+            "measured_height": rh if (rh and rh > 0.02) else None,
+            "measured_count": 1 if (rw and rh and rw > 0.02 and rh > 0.02) else 0,
         }
         LOG.info(
             "      NEW landmark #%d '%s %d' at world (%.3f, %.3f, %.3f) [nearest same-class: %s]",
@@ -361,9 +411,10 @@ class SemanticMapDB:
                 lm["hit_count"], lm["conf_sum"] / max(1, lm["hit_count"]), lm["max_confidence"],
                 lm["first_seen_ns"], lm["last_seen_ns"],
                 _ns_to_iso(lm["first_seen_ns"]), _ns_to_iso(lm["last_seen_ns"]),
+                lm.get("measured_width"), lm.get("measured_depth"), lm.get("measured_height"),
             ))
         self.conn.executemany(
-            "INSERT INTO semantic_map VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows
+            "INSERT INTO semantic_map VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows
         )
         self.conn.commit()
 
@@ -529,7 +580,7 @@ def build_detector(args: argparse.Namespace) -> capture.YoloEnsembleDinoDetector
 
 
 def build_size_lookup():
-    """Nominal (width, height) in metres per class, from the ontology."""
+    """Nominal (width, depth, height) in metres per class, from the ontology."""
     try:
         from rgbd_3d_filter import load_dimensions_config
 
@@ -550,7 +601,10 @@ def build_size_lookup():
         for candidate in aliases.get(class_name, [class_name]):
             spec = limits.get(candidate)
             if spec:
-                return (spec["min_w"] + spec["max_w"]) / 2.0, (spec["min_h"] + spec["max_h"]) / 2.0
+                w = float(spec.get("width") or (spec["min_w"] + spec["max_w"]) / 2.0)
+                d = float(spec.get("depth") or (spec.get("min_d", 0) + spec.get("max_d", 0)) / 2.0) or w
+                h = float(spec.get("height") or (spec["min_h"] + spec["max_h"]) / 2.0)
+                return w, d, h
         return None
 
     return lookup
@@ -591,6 +645,10 @@ def main() -> None:
     bag_path = Path(args.bag).resolve()
     if not bag_path.exists():
         raise FileNotFoundError(f"Bag not found: {bag_path}")
+    if bag_path.is_dir() and not (bag_path / "metadata.yaml").exists():
+        nested = [p.parent for p in bag_path.glob("*/metadata.yaml")]
+        if nested:
+            bag_path = nested[0]
     bag_label = bag_path.stem if bag_path.is_file() else bag_path.name
     safe_label = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in bag_label)
 
@@ -868,6 +926,13 @@ def main() -> None:
                     pins.append(pin)
                     continue
                 pin["depth_m"] = z_m
+
+                # Measure real 3D physical dimensions from camera depth point cloud
+                dims_3d = get_oriented_3d_dimensions(depth_mm, x1, y1, x2, y2, intr)
+                if dims_3d is not None:
+                    pin["real_width"], pin["real_depth"], pin["real_height"] = dims_3d
+                else:
+                    pin["real_width"] = pin["real_depth"] = pin["real_height"] = None
 
                 # Step 3: stays in the camera optical frame; the TF chain handles the axis convention.
                 cx, cy, cz = deproject(pin["u"], pin["v"], z_m, intr)

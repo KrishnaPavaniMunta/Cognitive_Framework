@@ -48,7 +48,10 @@ def find_latest_db(out_root: Path) -> Path:
 def load_landmarks(conn: sqlite3.Connection, min_hits: int, classes: set[str] | None) -> list[dict]:
     available = {row[1] for row in conn.execute("PRAGMA table_info(semantic_map)")}
     required = ["landmark_id", "class_name", "world_frame", "X", "Y", "Z", "hit_count", "mean_confidence"]
-    optional = ["instance_id", "max_confidence", "first_seen_ns", "last_seen_ns", "first_seen", "last_seen"]
+    optional = [
+        "instance_id", "max_confidence", "first_seen_ns", "last_seen_ns", "first_seen", "last_seen",
+        "measured_width", "measured_depth", "measured_height",
+    ]
     selected = required + [column for column in optional if column in available]
     rows = conn.execute(
         f"SELECT {', '.join(selected)} FROM semantic_map WHERE hit_count >= ? ORDER BY class_name, landmark_id",
@@ -66,6 +69,27 @@ def load_landmarks(conn: sqlite3.Connection, min_hits: int, classes: set[str] | 
         landmark.setdefault("last_seen_ns", None)
         landmark.setdefault("first_seen", "")
         landmark.setdefault("last_seen", "")
+        landmark.setdefault("measured_width", None)
+        landmark.setdefault("measured_depth", None)
+        landmark.setdefault("measured_height", None)
+
+    # Fallback to observations table if measured_width not in semantic_map or is None
+    obs_cols = {row[1] for row in conn.execute("PRAGMA table_info(observations)")}
+    if "real_width" in obs_cols:
+        for landmark in landmarks:
+            if landmark.get("measured_width") is None:
+                lid = landmark.get("landmark_id")
+                if lid is not None:
+                    row = conn.execute(
+                        "SELECT AVG(real_width), AVG(real_depth), AVG(real_height) "
+                        "FROM observations WHERE landmark_id = ? AND real_width IS NOT NULL AND real_height IS NOT NULL",
+                        (lid,),
+                    ).fetchone()
+                    if row and row[0] is not None:
+                        landmark["measured_width"] = float(row[0])
+                        landmark["measured_depth"] = float(row[1]) if row[1] is not None else float(row[0])
+                        landmark["measured_height"] = float(row[2])
+
     if classes:
         landmarks = [lm for lm in landmarks if lm["class_name"] in classes]
     return landmarks
@@ -189,16 +213,28 @@ def render_rerun(landmarks: list[dict], observations: list[dict],
                  trajectory: list[tuple[float, float, float]], application_id: str) -> None:
     import numpy as np
     import rerun as rr
-    from rerun_logger import class_color, log_landmark_entities
+    from rerun_logger import class_color, get_default_annotation_manager, log_landmark_entities
+
+    class_names = [lm["class_name"] for lm in landmarks]
+    if observations:
+        class_names.extend(o["class_name"] for o in observations)
+    manager = get_default_annotation_manager(class_names)
 
     rr.init(application_id, spawn=True)
     rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
+    rr.log("world", manager.build_context(), static=True)
     log_landmark_entities(landmarks)
 
     if observations:
         pts = np.asarray([[o["X"], o["Y"], o["Z"]] for o in observations], dtype=np.float32)
         obs_colors = [class_color(o["class_name"]) for o in observations]
-        rr.log("world/observations", rr.Points3D(pts, colors=obs_colors, radii=0.015), static=True)
+        obs_cids = [manager.get_id(o["class_name"]) for o in observations]
+        obs_labels = [f"{o['class_name']}" for o in observations]
+        rr.log(
+            "world/observations",
+            rr.Points3D(pts, colors=obs_colors, radii=0.015, class_ids=obs_cids, labels=obs_labels),
+            static=True,
+        )
 
     if len(trajectory) >= 2:
         rr.log(
@@ -252,8 +288,11 @@ def main() -> None:
     frames = {lm["world_frame"] for lm in landmarks}
     print(f"{db_path}\n{len(landmarks)} landmarks in frame(s): {', '.join(sorted(frames))}")
     for lm in landmarks:
+        dims_str = ""
+        if lm.get("measured_width") and lm.get("measured_height"):
+            dims_str = f" [real 3D: {lm['measured_width']:.2f}x{lm.get('measured_depth') or lm['measured_width']:.2f}x{lm['measured_height']:.2f}m]"
         print(f"  {lm['class_name']:<20} {lm['instance_id']:<3} "
-              f"({lm['X']:7.3f}, {lm['Y']:7.3f}, {lm['Z']:7.3f})  hits={lm['hit_count']}")
+              f"({lm['X']:7.3f}, {lm['Y']:7.3f}, {lm['Z']:7.3f}){dims_str}  hits={lm['hit_count']}")
 
     if args.html or args.rerun:
         attach_ontology_knowledge(landmarks, OntologyKnowledgeBase(Path(args.ontology).resolve()))
