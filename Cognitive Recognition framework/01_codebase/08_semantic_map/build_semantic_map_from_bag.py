@@ -27,6 +27,7 @@ import logging
 import math
 import shutil
 import sqlite3
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -782,6 +783,34 @@ def _ns_to_iso(timestamp_ns: int) -> str:
 
 
 # ── Rendering ─────────────────────────────────────────────────────────────────
+def get_class_bgr(class_name: str) -> tuple[int, int, int]:
+    palette: dict[str, tuple[int, int, int]] = {
+        "door": (240, 180, 50),            # Cyan / Sky blue
+        "radiator": (40, 165, 255),         # Orange
+        "dining table": (200, 80, 180),     # Purple
+        "table": (200, 80, 180),
+        "chair": (180, 100, 240),
+        "bench": (160, 120, 200),
+        "bench_hosp": (160, 120, 200),
+        "hazmat_sign": (0, 215, 255),       # Amber / Yellow
+        "exit_sign": (0, 230, 200),
+        "power_socket": (255, 120, 40),     # Azure / Blue
+        "general_bin": (60, 220, 60),       # Lime Green
+        "hospital_stretcher": (220, 60, 60), # Blue-Red
+        "infusion_pump": (80, 200, 220),
+        "iv_stand": (220, 180, 100),
+        "medical_tray": (140, 220, 120),
+        "spillage": (180, 20, 255),         # Deep Pink
+        "surgical_light": (40, 230, 230),   # Yellow
+        "security_camera": (100, 100, 255), # Red
+    }
+    c_lower = class_name.lower().strip()
+    if c_lower in palette:
+        return palette[c_lower]
+    h = abs(hash(c_lower))
+    return (60 + (h & 0x7F), 60 + ((h >> 8) & 0x7F), 60 + ((h >> 16) & 0x7F))
+
+
 def annotate(frame: np.ndarray, frame_index: int, timestamp_ns: int, pins: list[dict[str, Any]],
              landmark_total: int, extrinsics_status: str) -> np.ndarray:
     img = frame.copy()
@@ -789,11 +818,11 @@ def annotate(frame: np.ndarray, frame_index: int, timestamp_ns: int, pins: list[
         x1, y1, x2, y2 = (int(v) for v in pin["bbox_xyxy"])
         ok = pin["world_X"] is not None
         excluded = pin["reject_reason"] == "excluded class"
-        color = (150, 150, 150) if excluded else (0, 200, 0) if ok else (0, 140, 255)
+        color = (150, 150, 150) if excluded else get_class_bgr(pin["class_name"]) if ok else (0, 100, 255)
 
         mask = pin.get("mask")
         if mask is not None and np.any(mask):
-            overlay_mask_on_frame(img, mask, color, alpha=0.40, draw_contour=True)
+            overlay_mask_on_frame(img, mask, color, alpha=0.45, draw_contour=True)
 
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
         cv2.circle(img, (int(pin["u"]), int(pin["v"])), 4, (0, 0, 255), -1)
@@ -808,9 +837,17 @@ def annotate(frame: np.ndarray, frame_index: int, timestamp_ns: int, pins: list[
             f"W({pin['world_X']:.2f},{pin['world_Y']:.2f},{pin['world_Z']:.2f}) d={pin['depth_m']:.2f}m"
             if ok else f"NO 3D: {pin['reject_reason']}"
         )
-        y_text = y1 - 6 if y1 > 24 else y2 + 16
-        cv2.putText(img, head, (x1, y_text), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
-        cv2.putText(img, body, (x1, y_text + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
+
+        (tw1, th1), _ = cv2.getTextSize(head, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+        (tw2, th2), _ = cv2.getTextSize(body, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)
+        max_tw = max(tw1, tw2)
+        badge_y1 = max(0, y1 - th1 - th2 - 12) if y1 > 35 else y2 + 2
+        badge_y2 = badge_y1 + th1 + th2 + 10
+        cv2.rectangle(img, (x1, badge_y1), (min(img.shape[1], x1 + max_tw + 8), badge_y2), (20, 20, 20), -1)
+        cv2.rectangle(img, (x1, badge_y1), (min(img.shape[1], x1 + max_tw + 8), badge_y2), color, 1)
+
+        cv2.putText(img, head, (x1 + 4, badge_y1 + th1 + 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+        cv2.putText(img, body, (x1 + 4, badge_y1 + th1 + th2 + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (230, 230, 230), 1, cv2.LINE_AA)
 
     banner = (
         f"frame {frame_index} | t={timestamp_ns / 1e9:.3f}s | dets={len(pins)} "
@@ -1473,6 +1510,20 @@ def main() -> None:
                      scene.cloud_chunks, scene.points_logged, len(scene.trajectory), len(consensus_landmarks))
         if writer is not None:
             writer.release()
+            if video_path.exists() and shutil.which("ffmpeg"):
+                try:
+                    tmp_h264 = video_path.with_name("preview_h264.mp4")
+                    cmd = [
+                        "ffmpeg", "-y", "-i", str(video_path),
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                        "-crf", "22", "-preset", "fast", str(tmp_h264)
+                    ]
+                    res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+                    if res.returncode == 0 and tmp_h264.exists():
+                        tmp_h264.replace(video_path)
+                        LOG.info("[VIDEO] Converted preview to web-compatible H.264: %s", video_path)
+                except Exception as exc:
+                    LOG.debug("ffmpeg post-encoding skipped: %s", exc)
         cv2.destroyAllWindows()
 
     from view_semantic_map import refresh_semantic_map_html
