@@ -50,9 +50,15 @@ if str(ONTOLOGY_DIR) not in sys.path:
     sys.path.insert(0, str(ONTOLOGY_DIR))
 
 import rosbag_rgbd_sim_capture as capture  # noqa: E402  (path bootstrap must run first)
+from fast_sam_segmenter import FastSAMSegmenter, overlay_mask_on_frame  # noqa: E402
 from ontology_knowledge import OntologyKnowledgeBase  # noqa: E402
-from rgbd_3d_filter import get_oriented_3d_dimensions  # noqa: E402
+from rgbd_3d_filter import (  # noqa: E402
+    extract_world_surface_points,
+    get_oriented_3d_dimensions,
+    load_dimensions_config,
+)
 from tf_tree import TFTree, normalize_frame  # noqa: E402
+
 
 DEFAULT_OUT_ROOT = PROJECT_ROOT / "04_outputs_runs_and_logs" / "outputs" / "semantic_maps"
 
@@ -86,6 +92,101 @@ def sample_depth_m(depth_mm: np.ndarray, u: int, v: int, half: int = DEPTH_PATCH
     if not (MIN_VALID_DEPTH_M <= z_m <= MAX_VALID_DEPTH_M):
         return None
     return z_m
+
+
+def sample_box_foreground_depth_m(
+    depth_mm: np.ndarray,
+    bbox_xyxy: list[float] | tuple[float, float, float, float],
+    u: float,
+    v: float,
+    half: int = DEPTH_PATCH_HALF,
+    mask: np.ndarray | None = None,
+) -> tuple[float | None, float, float]:
+    """
+    Robust depth association:
+    1. First tries the central patch around (u, v) (if mask is None or (u, v) is in mask).
+    2. If that yields no valid depth (common for chairs with hollow spaces or IR dropout),
+       falls back to foreground depth extraction within the neural mask or bounding box ROI:
+       - Samples within neural mask (or inner 80% if mask is None).
+       - Filters valid depth pixels in range [MIN_VALID_DEPTH_M, MAX_VALID_DEPTH_M].
+       - Extracts the 30th percentile depth (nearest physical surface, eliminating wall background bleed).
+       - Re-centers (u, v) on the foreground cluster centroid so 3D ray deprojection hits the physical object.
+    Returns: (z_m, adjusted_u, adjusted_v)
+    """
+    h_img, w_img = depth_mm.shape[:2]
+    u_int, v_int = int(round(u)), int(round(v))
+
+    # 1. Try standard center patch first if point falls inside mask
+    center_in_mask = True
+    if mask is not None and 0 <= u_int < w_img and 0 <= v_int < h_img:
+        center_in_mask = bool(mask[v_int, u_int] > 0)
+
+    if center_in_mask:
+        z_m = sample_depth_m(depth_mm, u_int, v_int, half=half)
+        if z_m is not None:
+            return z_m, u, v
+
+    # 2. Fallback: foreground ROI / neural mask depth extraction
+    x1, y1, x2, y2 = bbox_xyxy
+    bx1, by1 = max(0, int(x1)), max(0, int(y1))
+    bx2, by2 = min(w_img, int(x2)), min(h_img, int(y2))
+    bw = bx2 - bx1
+    bh = by2 - by1
+    if bw < 4 or bh < 4:
+        return None, u, v
+
+    min_d_mm = MIN_VALID_DEPTH_M * 1000.0
+    max_d_mm = MAX_VALID_DEPTH_M * 1000.0
+
+    # If neural mask is provided, isolate foreground strictly within the mask ROI
+    if mask is not None:
+        depth_roi = depth_mm[by1:by2, bx1:bx2].astype(np.float32)
+        mask_roi = mask[by1:by2, bx1:bx2] > 0
+        valid_mask = np.isfinite(depth_roi) & (depth_roi >= min_d_mm) & (depth_roi <= max_d_mm) & mask_roi
+        offset_x, offset_y = bx1, by1
+        if int(np.sum(valid_mask)) < 10:
+            mask = None  # fallback to geometric inner ROI heuristic
+
+    if mask is None:
+        # Focus on inner region to avoid edge boundary bleeding
+        inner_x1 = max(0, int(bx1 + 0.10 * bw))
+        inner_x2 = min(w_img, int(bx2 - 0.10 * bw))
+        inner_y1 = max(0, int(by1 + 0.10 * bh))
+        inner_y2 = min(h_img, int(by2 - 0.05 * bh))
+        if inner_x2 <= inner_x1 or inner_y2 <= inner_y1:
+            inner_x1, inner_x2 = bx1, bx2
+            inner_y1, inner_y2 = by1, by2
+
+        depth_roi = depth_mm[inner_y1:inner_y2, inner_x1:inner_x2].astype(np.float32)
+        valid_mask = np.isfinite(depth_roi) & (depth_roi >= min_d_mm) & (depth_roi <= max_d_mm)
+
+        if int(np.sum(valid_mask)) < 10:
+            # If inner region had too few valid points, try full bounding box
+            depth_roi = depth_mm[by1:by2, bx1:bx2].astype(np.float32)
+            valid_mask = np.isfinite(depth_roi) & (depth_roi >= min_d_mm) & (depth_roi <= max_d_mm)
+            if int(np.sum(valid_mask)) < 10:
+                return None, u, v
+            offset_x, offset_y = bx1, by1
+        else:
+            offset_x, offset_y = inner_x1, inner_y1
+
+    valid_depths = depth_roi[valid_mask]
+    # 30th percentile represents the nearest solid surface of the object (e.g. seat/cushion)
+    z_fg_mm = float(np.percentile(valid_depths, 30))
+    z_fg_m = z_fg_mm / 1000.0
+    if not (MIN_VALID_DEPTH_M <= z_fg_m <= MAX_VALID_DEPTH_M):
+        return None, u, v
+
+    # Re-center (u, v) on the foreground cluster centroid (within 300mm of z_fg_mm)
+    fg_cluster = valid_mask & (np.abs(depth_roi - z_fg_mm) <= 300.0)
+    if np.any(fg_cluster):
+        ys, xs = np.where(fg_cluster)
+        u_adj = float(np.median(xs)) + offset_x
+        v_adj = float(np.median(ys)) + offset_y
+    else:
+        u_adj, v_adj = u, v
+
+    return z_fg_m, u_adj, v_adj
 
 
 # ── Step 3: de-projection ─────────────────────────────────────────────────────
@@ -138,7 +239,9 @@ class SemanticMapDB:
                 last_seen     TEXT NOT NULL,
                 measured_width REAL,
                 measured_depth REAL,
-                measured_height REAL
+                measured_height REAL,
+                class_votes_json TEXT,
+                consensus_score REAL
             );
 
             CREATE TABLE IF NOT EXISTS observations (
@@ -198,6 +301,21 @@ class SemanticMapDB:
                 map_class_name    TEXT NOT NULL,
                 updated_utc       TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS navigable_zones (
+                zone_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                zone_name     TEXT NOT NULL,
+                world_frame   TEXT NOT NULL,
+                min_x         REAL NOT NULL,
+                max_x         REAL NOT NULL,
+                min_y         REAL NOT NULL,
+                max_y         REAL NOT NULL,
+                elevation_z   REAL NOT NULL,
+                area_m2       REAL NOT NULL,
+                point_count   INTEGER NOT NULL,
+                polygon_json  TEXT,
+                created_utc   TEXT NOT NULL
+            );
             """
         )
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(semantic_map)")}
@@ -217,6 +335,12 @@ class SemanticMapDB:
             self.conn.execute("ALTER TABLE semantic_map ADD COLUMN measured_width REAL")
             self.conn.execute("ALTER TABLE semantic_map ADD COLUMN measured_depth REAL")
             self.conn.execute("ALTER TABLE semantic_map ADD COLUMN measured_height REAL")
+        if "class_votes_json" not in columns:
+            self.conn.execute("ALTER TABLE semantic_map ADD COLUMN class_votes_json TEXT")
+        if "consensus_score" not in columns:
+            self.conn.execute("ALTER TABLE semantic_map ADD COLUMN consensus_score REAL")
+        if "surface_points_json" not in columns:
+            self.conn.execute("ALTER TABLE semantic_map ADD COLUMN surface_points_json TEXT")
         self.conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_map_class_instance ON semantic_map(class_name, instance_id)"
         )
@@ -233,12 +357,18 @@ class SemanticMapDB:
     def _load_landmarks(self) -> None:
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(semantic_map)")}
         has_measured = "measured_width" in columns
+        has_consensus = "class_votes_json" in columns
+        has_surface = "surface_points_json" in columns
         select_cols = (
             "landmark_id, class_name, instance_id, world_frame, X, Y, Z, "
             "hit_count, mean_confidence, max_confidence, first_seen_ns, last_seen_ns"
         )
         if has_measured:
             select_cols += ", measured_width, measured_depth, measured_height"
+        if has_consensus:
+            select_cols += ", class_votes_json, consensus_score"
+        if has_surface:
+            select_cols += ", surface_points_json"
         rows = self.conn.execute(f"SELECT {select_cols} FROM semantic_map").fetchall()
         for row in rows:
             lid, class_name, instance_id, world_frame, x, y, z, hits, mean_conf, max_conf, first_ns, last_ns = row[:12]
@@ -252,12 +382,36 @@ class SemanticMapDB:
                 "max_confidence": float(max_conf),
                 "first_seen_ns": int(first_ns), "last_seen_ns": int(last_ns),
             }
-            if has_measured and len(row) >= 15:
-                mw, md, mh = row[12], row[13], row[14]
+            idx = 12
+            if has_measured and len(row) >= idx + 3:
+                mw, md, mh = row[idx], row[idx + 1], row[idx + 2]
                 record["measured_width"] = float(mw) if mw is not None else None
                 record["measured_depth"] = float(md) if md is not None else None
                 record["measured_height"] = float(mh) if mh is not None else None
                 record["measured_count"] = int(hits) if (mw and mh) else 0
+                idx += 3
+            if has_consensus and len(row) >= idx + 2:
+                votes_raw, score = row[idx], row[idx + 1]
+                try:
+                    record["class_votes"] = json.loads(votes_raw) if votes_raw else {class_name: float(mean_conf) * int(hits)}
+                except Exception:
+                    record["class_votes"] = {class_name: float(mean_conf) * int(hits)}
+                record["consensus_score"] = float(score) if score is not None else 1.0
+                idx += 2
+            else:
+                record["class_votes"] = {class_name: float(mean_conf) * int(hits)}
+                record["consensus_score"] = 1.0
+            if has_surface and len(row) > idx:
+                surf_raw = row[idx]
+                if surf_raw:
+                    try:
+                        record["surface_points"] = np.asarray(json.loads(surf_raw), dtype=np.float32)
+                    except Exception:
+                        record["surface_points"] = None
+                else:
+                    record["surface_points"] = None
+            else:
+                record["surface_points"] = None
             self._landmarks[int(lid)] = record
         self._next_id = max(self._landmarks, default=0) + 1
         self._class_remaps = dict(self.conn.execute("SELECT source_class_name, map_class_name FROM class_remaps"))
@@ -293,6 +447,27 @@ class SemanticMapDB:
              float(m[0, 3]), float(m[1, 3]), float(m[2, 3]), json.dumps(m.tolist())),
         )
 
+    def save_navigable_zone(self, zone_info: dict, world_frame: str) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO navigable_zones (
+                zone_name, world_frame, min_x, max_x, min_y, max_y,
+                elevation_z, area_m2, point_count, polygon_json, created_utc
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                zone_info.get("zone_name", "Floor"),
+                world_frame,
+                float(zone_info["min_x"]), float(zone_info["max_x"]),
+                float(zone_info["min_y"]), float(zone_info["max_y"]),
+                float(zone_info["elevation_z"]), float(zone_info["area_m2"]),
+                int(zone_info.get("point_count", 0)),
+                json.dumps(zone_info.get("polygon", [])),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        self.conn.commit()
+
     def add_observation(self, record: dict[str, Any]) -> tuple[int | None, int | None]:
         """Merge into the nearest same-class landmark within the radius, else create a new one."""
         landmark_id = None
@@ -322,24 +497,53 @@ class SemanticMapDB:
 
     def _merge(self, record: dict[str, Any]) -> int:
         wx, wy, wz = record["world_X"], record["world_Y"], record["world_Z"]
-        best_id, best_dist = None, float("inf")
-
-        for lid, lm in self._landmarks.items():
-            if lm["class_name"] != record["class_name"]:
-                continue
-            dist = math.dist((lm["X"], lm["Y"], lm["Z"]), (wx, wy, wz))
-            if dist < best_dist:
-                best_id, best_dist = lid, dist
-
         conf = float(record["confidence"] or 0.0)
+        det_class = record["class_name"]
+
         rw = record.get("real_width")
         rd = record.get("real_depth")
         rh = record.get("real_height")
 
-        if best_id is not None and best_dist <= self.merge_radius_m:
+        # Dynamic physical footprint calculated directly from the detected dimensions
+        det_extent = max(rw or 0.45, rd or 0.45, 0.40)
+        det_radius_xy = max(self.merge_radius_m, det_extent * 0.70)
+        det_height = max(rh or 0.70, 0.70)
+
+        # 1. Search for existing landmarks:
+        # Priority 1: Same-class match within dynamic footprint
+        best_same_id, best_same_dist_xy = None, float("inf")
+        # Priority 2: Different-class occupant at same spot (for handling replacement e.g. bench replacing table)
+        best_occupant_id, best_occupant_dist_xy = None, float("inf")
+
+        for lid, lm in self._landmarks.items():
+            dist_xy = math.dist((lm["X"], lm["Y"]), (wx, wy))
+            dist_z = abs(lm["Z"] - wz)
+
+            # Landmark dynamic footprint
+            lm_extent = max(lm.get("measured_width") or 0.45, lm.get("measured_depth") or 0.45, 0.40)
+            lm_radius_xy = max(det_radius_xy, lm_extent * 0.70)
+            lm_height = max(lm.get("measured_height") or 0.70, det_height)
+
+            # Height compatibility allows different viewing angles along the object's height
+            z_compatible = dist_z <= (lm_height * 0.85 + 0.35)
+
+            if dist_xy <= lm_radius_xy and z_compatible:
+                if lm["class_name"] == det_class:
+                    if dist_xy < best_same_dist_xy:
+                        best_same_id, best_same_dist_xy = lid, dist_xy
+                else:
+                    if dist_xy < best_occupant_dist_xy:
+                        best_occupant_id, best_occupant_dist_xy = lid, dist_xy
+
+        # Target selection: prioritize same-class landmark, else fall back to spatial occupant
+        best_id = best_same_id if best_same_id is not None else best_occupant_id
+        best_dist = best_same_dist_xy if best_same_id is not None else best_occupant_dist_xy
+
+        # 2. Fuse into existing 3D node if within dynamic envelope
+        if best_id is not None:
             lm = self._landmarks[best_id]
             n = lm["hit_count"]
-            if record["class_name"] in self.dynamic_classes:
+            if det_class in self.dynamic_classes:
                 # Averaging a moving object smears it; keep the most recent fix.
                 lm["X"], lm["Y"], lm["Z"] = wx, wy, wz
             else:
@@ -351,7 +555,27 @@ class SemanticMapDB:
             lm["hit_count"] = n + 1
             lm["last_seen_ns"] = record["timestamp_ns"]
 
-            # Update real measured physical dimensions from camera depth
+            # Multi-View Consensus: accumulate class confidence votes
+            votes = lm.setdefault("class_votes", {})
+            votes[det_class] = votes.get(det_class, 0.0) + max(0.01, conf)
+
+            # Consensus winner is argmax(votes)
+            winner_class = max(votes, key=votes.get)
+            total_votes = sum(votes.values())
+            old_class = lm["class_name"]
+            lm["class_name"] = winner_class
+            lm["consensus_score"] = float(votes[winner_class] / max(0.001, total_votes))
+
+            # Maintain instance ID consistency if winning class shifted
+            if old_class != winner_class:
+                max_inst = max(
+                    (other["instance_id"] for other_id, other in self._landmarks.items()
+                     if other_id != best_id and other["class_name"] == winner_class),
+                    default=0,
+                )
+                lm["instance_id"] = max_inst + 1
+
+            # Progressive 3D physical dimension refinement from multi-view depth
             if rw is not None and rh is not None and rw > 0.02 and rh > 0.02:
                 cur_w = lm.get("measured_width")
                 if cur_w is not None and cur_w > 0:
@@ -366,22 +590,37 @@ class SemanticMapDB:
                     lm["measured_height"] = rh
                     lm["measured_count"] = 1
 
+            # Multi-view point cloud aggregation for Rerun 3D surface visualization
+            pts = record.get("surface_points")
+            if pts is not None and len(pts) > 0:
+                existing_pts = lm.get("surface_points")
+                if existing_pts is not None and len(existing_pts) > 0:
+                    merged_pts = np.vstack([existing_pts, pts])
+                    if len(merged_pts) > 1500:
+                        keep_idx = np.random.choice(len(merged_pts), size=1500, replace=False)
+                        merged_pts = merged_pts[keep_idx]
+                    lm["surface_points"] = merged_pts
+                else:
+                    lm["surface_points"] = pts
+
             LOG.debug(
-                "      merged into landmark #%d (%s) d=%.3fm -> (%.3f, %.3f, %.3f) hits=%d dims=(%.2f, %.2f, %.2f)",
-                best_id, lm["class_name"], best_dist, lm["X"], lm["Y"], lm["Z"], lm["hit_count"],
-                lm.get("measured_width") or 0.0, lm.get("measured_depth") or 0.0, lm.get("measured_height") or 0.0,
+                "      merged into landmark #%d (%s, cons=%.0f%%) d_xy=%.3fm -> (%.3f, %.3f, %.3f) hits=%d",
+                best_id, lm["class_name"], lm["consensus_score"] * 100, best_dist,
+                lm["X"], lm["Y"], lm["Z"], lm["hit_count"],
             )
             return best_id
 
+        # 3. Spawn a new persistent 3D node
         lid = self._next_id
         self._next_id += 1
         instance_id = 1 + max(
             (lm["instance_id"] for lm in self._landmarks.values()
-             if lm["class_name"] == record["class_name"]),
+             if lm["class_name"] == det_class),
             default=0,
         )
+        pts = record.get("surface_points")
         self._landmarks[lid] = {
-            "class_name": record["class_name"],
+            "class_name": det_class,
             "instance_id": instance_id,
             "world_frame": record["world_frame"],
             "X": wx, "Y": wy, "Z": wz,
@@ -394,27 +633,135 @@ class SemanticMapDB:
             "measured_depth": rd if (rd and rd > 0.02) else (rw if (rw and rw > 0.02) else None),
             "measured_height": rh if (rh and rh > 0.02) else None,
             "measured_count": 1 if (rw and rh and rw > 0.02 and rh > 0.02) else 0,
+            "surface_points": pts if pts is not None else None,
+            "class_votes": {det_class: max(0.01, conf)},
+            "consensus_score": 1.0,
         }
         LOG.info(
-            "      NEW landmark #%d '%s %d' at world (%.3f, %.3f, %.3f) [nearest same-class: %s]",
-            lid, record["class_name"], instance_id, wx, wy, wz,
-            "none" if best_id is None else f"{best_dist:.3f}m",
+            "      NEW landmark #%d '%s %d' at world (%.3f, %.3f, %.3f)",
+            lid, det_class, instance_id, wx, wy, wz,
         )
         return lid
+
+    def consolidate_landmarks(self) -> int:
+        """
+        Post-run agglomerative deduplication pass:
+        Consolidates any landmarks of the same class whose physical footprints overlap on the ground plane.
+        Ensures zero duplicate door/radiator/counter numbers in the final map.
+        Returns the number of merged/removed duplicate landmarks.
+        """
+        merged_count = 0
+        lids = sorted(self._landmarks.keys())
+        to_delete: set[int] = set()
+
+        for i, lid1 in enumerate(lids):
+            if lid1 in to_delete or lid1 not in self._landmarks:
+                continue
+            lm1 = self._landmarks[lid1]
+
+            for lid2 in lids[i + 1:]:
+                if lid2 in to_delete or lid2 not in self._landmarks:
+                    continue
+                lm2 = self._landmarks[lid2]
+
+                if lm1["class_name"] != lm2["class_name"]:
+                    continue
+
+                dist_xy = math.dist((lm1["X"], lm1["Y"]), (lm2["X"], lm2["Y"]))
+                dist_z = abs(lm1["Z"] - lm2["Z"])
+
+                extent1 = max(lm1.get("measured_width") or 0.45, lm1.get("measured_depth") or 0.45, 0.40)
+                extent2 = max(lm2.get("measured_width") or 0.45, lm2.get("measured_depth") or 0.45, 0.40)
+                radius_xy = max(self.merge_radius_m, max(extent1, extent2) * 0.70)
+                height = max(lm1.get("measured_height") or 0.70, lm2.get("measured_height") or 0.70)
+
+                if dist_xy <= radius_xy and dist_z <= (height * 0.85 + 0.35):
+                    n1, n2 = lm1["hit_count"], lm2["hit_count"]
+                    tot = n1 + n2
+                    lm1["X"] = (lm1["X"] * n1 + lm2["X"] * n2) / tot
+                    lm1["Y"] = (lm1["Y"] * n1 + lm2["Y"] * n2) / tot
+                    lm1["Z"] = (lm1["Z"] * n1 + lm2["Z"] * n2) / tot
+                    lm1["hit_count"] = tot
+                    lm1["conf_sum"] += lm2["conf_sum"]
+                    lm1["max_confidence"] = max(lm1["max_confidence"], lm2["max_confidence"])
+                    lm1["first_seen_ns"] = min(lm1["first_seen_ns"], lm2["first_seen_ns"])
+                    lm1["last_seen_ns"] = max(lm1["last_seen_ns"], lm2["last_seen_ns"])
+
+                    votes1 = lm1.setdefault("class_votes", {})
+                    for cls_name, v_score in lm2.get("class_votes", {}).items():
+                        votes1[cls_name] = votes1.get(cls_name, 0.0) + v_score
+                    winner_class = max(votes1, key=votes1.get)
+                    lm1["class_name"] = winner_class
+                    lm1["consensus_score"] = float(votes1[winner_class] / max(0.001, sum(votes1.values())))
+
+                    mw1, mw2 = lm1.get("measured_width"), lm2.get("measured_width")
+                    if mw1 and mw2:
+                        lm1["measured_width"] = (mw1 * n1 + mw2 * n2) / tot
+                        lm1["measured_depth"] = ((lm1.get("measured_depth") or mw1) * n1 + (lm2.get("measured_depth") or mw2) * n2) / tot
+                        lm1["measured_height"] = ((lm1.get("measured_height") or 1.0) * n1 + (lm2.get("measured_height") or 1.0) * n2) / tot
+                    elif mw2:
+                        lm1["measured_width"] = lm2.get("measured_width")
+                        lm1["measured_depth"] = lm2.get("measured_depth")
+                        lm1["measured_height"] = lm2.get("measured_height")
+
+                    pts1, pts2 = lm1.get("surface_points"), lm2.get("surface_points")
+                    if pts1 is not None and pts2 is not None:
+                        merged_pts = np.vstack([pts1, pts2])
+                        if len(merged_pts) > 1500:
+                            merged_pts = merged_pts[np.random.choice(len(merged_pts), size=1500, replace=False)]
+                        lm1["surface_points"] = merged_pts
+                    elif pts2 is not None:
+                        lm1["surface_points"] = pts2
+
+                    to_delete.add(lid2)
+                    merged_count += 1
+                    LOG.info(
+                        "      [DEDUP] Consolidated duplicate landmark #%d into #%d '%s %d' (d_xy=%.3fm)",
+                        lid2, lid1, lm1["class_name"], lm1["instance_id"], dist_xy,
+                    )
+
+        for lid in to_delete:
+            del self._landmarks[lid]
+
+        class_counters: dict[str, int] = {}
+        for lid, lm in sorted(self._landmarks.items(), key=lambda kv: (kv[1]["class_name"], kv[1]["first_seen_ns"])):
+            cname = lm["class_name"]
+            class_counters[cname] = class_counters.get(cname, 0) + 1
+            lm["instance_id"] = class_counters[cname]
+
+        return merged_count
 
     def flush_landmarks(self) -> None:
         self.conn.execute("DELETE FROM semantic_map")
         rows = []
         for lid, lm in self._landmarks.items():
+            pts = lm.get("surface_points")
+            if pts is not None and isinstance(pts, np.ndarray):
+                pts_json = json.dumps(pts.tolist())
+            elif pts is not None and isinstance(pts, list):
+                pts_json = json.dumps(pts)
+            else:
+                pts_json = None
             rows.append((
                 lid, lm["class_name"], lm["instance_id"], lm["world_frame"], lm["X"], lm["Y"], lm["Z"],
                 lm["hit_count"], lm["conf_sum"] / max(1, lm["hit_count"]), lm["max_confidence"],
                 lm["first_seen_ns"], lm["last_seen_ns"],
                 _ns_to_iso(lm["first_seen_ns"]), _ns_to_iso(lm["last_seen_ns"]),
                 lm.get("measured_width"), lm.get("measured_depth"), lm.get("measured_height"),
+                json.dumps(lm.get("class_votes", {lm["class_name"]: 1.0})),
+                float(lm.get("consensus_score", 1.0)),
+                pts_json,
             ))
         self.conn.executemany(
-            "INSERT INTO semantic_map VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows
+            """
+            INSERT INTO semantic_map (
+                landmark_id, class_name, instance_id, world_frame, X, Y, Z,
+                hit_count, mean_confidence, max_confidence, first_seen_ns, last_seen_ns,
+                first_seen, last_seen, measured_width, measured_depth, measured_height,
+                class_votes_json, consensus_score, surface_points_json
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            rows,
         )
         self.conn.commit()
 
@@ -423,8 +770,11 @@ class SemanticMapDB:
         return self._landmarks
 
     def close(self) -> None:
-        self.conn.commit()
-        self.conn.close()
+        try:
+            self.conn.commit()
+            self.conn.close()
+        except sqlite3.ProgrammingError:
+            pass
 
 
 def _ns_to_iso(timestamp_ns: int) -> str:
@@ -440,11 +790,20 @@ def annotate(frame: np.ndarray, frame_index: int, timestamp_ns: int, pins: list[
         ok = pin["world_X"] is not None
         excluded = pin["reject_reason"] == "excluded class"
         color = (150, 150, 150) if excluded else (0, 200, 0) if ok else (0, 140, 255)
+
+        mask = pin.get("mask")
+        if mask is not None and np.any(mask):
+            overlay_mask_on_frame(img, mask, color, alpha=0.40, draw_contour=True)
+
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
         cv2.circle(img, (int(pin["u"]), int(pin["v"])), 4, (0, 0, 255), -1)
 
-        instance_label = f" {pin['instance_id']}" if pin.get("instance_id") is not None else ""
-        head = f"{pin['class_name']}{instance_label} {float(pin['confidence'] or 0):.0%}"
+        is_floor = pin["class_name"].strip().lower() in ("floor", "navigable_floor")
+        if is_floor:
+            head = f"Floor {float(pin['confidence'] or 0):.0%}"
+        else:
+            instance_label = f" {pin['instance_id']}" if pin.get("instance_id") is not None else ""
+            head = f"{pin['class_name']}{instance_label} {float(pin['confidence'] or 0):.0%}"
         body = (
             f"W({pin['world_X']:.2f},{pin['world_Y']:.2f},{pin['world_Z']:.2f}) d={pin['depth_m']:.2f}m"
             if ok else f"NO 3D: {pin['reject_reason']}"
@@ -502,7 +861,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-odom-delta-ms", type=float, default=100.0)
 
     p.add_argument("--merge-radius-m", type=float, default=0.5,
-                   help="Same-class detections within this distance are treated as one object")
+                   help="Spatial clustering radius in metres (detections within this distance are fused into a 3D node)")
+    p.add_argument("--reset-map", action="store_true",
+                   help="Clear existing persistent world_map.db and start a fresh map without legacy seeding")
+    p.add_argument("--min-consensus-hits", type=int, default=1,
+                   help="Minimum multi-view hits required to export a landmark to Rerun / HTML (default 1)")
     p.add_argument("--min-confidence", type=float, default=0.0, help="Drop detections below this confidence")
     p.add_argument("--exclude-classes", default=DEFAULT_EXCLUDED_CLASSES,
                    help="Comma-separated classes never written to the map (still shown in preview)")
@@ -518,6 +881,9 @@ def parse_args() -> argparse.Namespace:
                    help="Run the DINO fallback every Nth processed frame (1 = every frame)")
     p.add_argument("--disable-dino", action="store_true")
     p.add_argument("--disable-depth-gate", action="store_true")
+    p.add_argument("--disable-fast-sam", action="store_true", help="Disable FastSAM neural instance segmentation")
+
+    p.add_argument("--fast-sam-weights", default="", help="Path to FastSAM weights (default: FastSAM-s.pt)")
     p.add_argument("--detector-module-path", default="")
     p.add_argument("--v1-path", default="")
     p.add_argument("--v2-path", default="")
@@ -723,11 +1089,34 @@ def main() -> None:
 
     detector = None if args.rerun_only else build_detector(args)
 
+    segmenter: FastSAMSegmenter | None = None
+    if not args.rerun_only and not args.disable_fast_sam:
+        try:
+            weights_file = (
+                Path(args.fast_sam_weights).resolve()
+                if args.fast_sam_weights
+                else (PROJECT_ROOT / "FastSAM-s.pt")
+            )
+            if not weights_file.exists():
+                weights_file = Path("FastSAM-s.pt")
+            segmenter = FastSAMSegmenter(weights_path=weights_file, device=args.detector_device)
+            LOG.info("[FastSAM] Neural instance segmentation enabled (device: %s, weights: %s)",
+                     args.detector_device, weights_file.name)
+        except Exception as exc:
+            LOG.warning("[FastSAM] Could not load FastSAM segmenter: %s. Continuing in bounding box mode.", exc)
+            segmenter = None
+
+
+
     depth_ts = [m.timestamp_ns for m in depth_messages]
     cam_ts = [m.timestamp_ns for m in caminfo_messages]
 
     db_path = run_dir / "world_map.db"
-    migrated_from = seed_persistent_map_from_legacy(Path(args.out_root).resolve(), safe_label, db_path)
+    if args.reset_map and db_path.exists():
+        db_path.unlink()
+        LOG.info("[MAP ] Reset map requested: deleted existing %s", db_path)
+
+    migrated_from = None if args.reset_map else seed_persistent_map_from_legacy(Path(args.out_root).resolve(), safe_label, db_path)
     if migrated_from is not None:
         LOG.info("[MAP ] Seeded persistent map from legacy run: %s", migrated_from.parent.name)
     db = SemanticMapDB(db_path, args.merge_radius_m, dynamic_classes)
@@ -766,9 +1155,13 @@ def main() -> None:
         "detections_total": 0, "pins_created": 0,
         "rejected_excluded_class": 0, "rejected_low_conf": 0,
         "rejected_no_depth_value": 0, "rejected_no_extrinsics": 0,
+        "rejected_physical_dims": 0,
         "frames_missing_extrinsics": 0, "odom_fallback_frames": 0, "identity_pose_frames": 0,
         "implausible_height_pins": 0,
     }
+    ontology_limits = load_dimensions_config(DEFAULT_ONTOLOGY)
+    LOG.info("[ONTOLOGY] Loaded physical dimension limits for %d classes from %s",
+             len(ontology_limits), DEFAULT_ONTOLOGY.name)
     class_histogram: dict[str, int] = {}
     world_frame_seen: set[str] = set()
     odom_ts = [r.timestamp_ns for r in odom_records]
@@ -870,6 +1263,16 @@ def main() -> None:
             processed_counter += 1
             stats["processed_frames"] += 1
 
+            # Step 1.5: FastSAM neural instance segmentation (box-prompted mode)
+            masks: list[tuple[np.ndarray, np.ndarray]] = []
+            if segmenter is not None and detections:
+                try:
+                    boxes = [det["bbox_xyxy"] for det in detections]
+                    masks = segmenter.segment_boxes(rgb_img, boxes)
+                except Exception as exc:
+                    LOG.warning("[FastSAM] Segmentation error at frame %d: %s", processed_counter, exc)
+                    masks = []
+
             LOG.debug(
                 "[FRAME %05d] t=%.3fs depth_dt=%.1fms dets=%d tf=%s (%s)",
                 processed_counter, rgb_item.timestamp_ns / 1e9, depth_delta / 1e6,
@@ -878,12 +1281,15 @@ def main() -> None:
             )
 
             pins: list[dict[str, Any]] = []
-            for det in detections:
+            for det_idx, det in enumerate(detections):
                 x1, y1, x2, y2 = det["bbox_xyxy"]
                 source_class_name = det["class_label"]
                 class_name = db.map_class_name(source_class_name)
                 conf = det.get("confidence")
                 class_histogram[source_class_name] = class_histogram.get(source_class_name, 0) + 1
+
+                raw_mask = masks[det_idx][0] if det_idx < len(masks) else None
+                eroded_mask = masks[det_idx][1] if det_idx < len(masks) else None
 
                 pin: dict[str, Any] = {
                     "frame_index": processed_counter,
@@ -902,6 +1308,9 @@ def main() -> None:
                     "extrinsics_source": extrinsics_source if pose_matrix is not None else None,
                     "extrinsics_status": extrinsics_status,
                     "reject_reason": "",
+                    "mask": raw_mask,
+                    "eroded_mask": eroded_mask,
+                    "surface_points": None,
                 }
 
                 if class_name in excluded_classes:
@@ -916,21 +1325,48 @@ def main() -> None:
                     pins.append(pin)
                     continue
 
-                # Step 2
-                z_m = sample_depth_m(depth_mm, int(round(pin["u"])), int(round(pin["v"])))
+                # Step 2: robust foreground depth association (handles hollow furniture/chairs)
+                z_m, adj_u, adj_v = sample_box_foreground_depth_m(
+                    depth_mm, [x1, y1, x2, y2], pin["u"], pin["v"], mask=eroded_mask
+                )
                 if z_m is None:
                     stats["rejected_no_depth_value"] += 1
                     pin["reject_reason"] = "no valid depth"
-                    LOG.debug("      %-18s bbox=(%.0f,%.0f,%.0f,%.0f) -> no valid depth at midpoint",
+                    LOG.debug("      %-18s bbox=(%.0f,%.0f,%.0f,%.0f) -> no valid depth in bbox",
                               class_name, x1, y1, x2, y2)
                     pins.append(pin)
                     continue
                 pin["depth_m"] = z_m
+                pin["u"] = adj_u
+                pin["v"] = adj_v
 
-                # Measure real 3D physical dimensions from camera depth point cloud
-                dims_3d = get_oriented_3d_dimensions(depth_mm, x1, y1, x2, y2, intr)
+                # Measure real 3D physical dimensions from camera depth point cloud (guided by eroded mask)
+                dims_3d = get_oriented_3d_dimensions(depth_mm, x1, y1, x2, y2, intr, mask=eroded_mask)
                 if dims_3d is not None:
                     pin["real_width"], pin["real_depth"], pin["real_height"] = dims_3d
+
+                    # Step 3: Physical 3D Geometric Gatekeeper directly from Ontology
+                    # Checks measured (rw, rd, rh) against limits loaded from ontology.rdf
+                    if class_name in ontology_limits:
+                        lim = ontology_limits[class_name]
+                        rw, rd, rh = dims_3d
+                        w_ok = lim["min_w"] <= rw <= lim["max_w"]
+                        h_ok = lim["min_h"] <= rh <= lim["max_h"]
+                        min_d = lim.get("min_d", 0.0)
+                        max_d = lim.get("max_d", 0.0)
+                        d_ok = True
+                        if min_d > 0.0 and rd < min_d:
+                            d_ok = False
+                        if max_d > 0.0 and rd > max_d:
+                            d_ok = False
+
+                        if not (w_ok and h_ok and d_ok):
+                            stats["rejected_physical_dims"] = stats.get("rejected_physical_dims", 0) + 1
+                            pin["reject_reason"] = f"failed ontology dimension gate ({rw:.2f}x{rd:.2f}x{rh:.2f}m vs ontology W[{lim['min_w']}-{lim['max_w']}], H[{lim['min_h']}-{lim['max_h']}])"
+                            LOG.debug("      %-18s dropped: failed ontology dimension gate (%.2fx%.2fx%.2fm vs ontology)",
+                                      class_name, rw, rd, rh)
+                            pins.append(pin)
+                            continue
                 else:
                     pin["real_width"] = pin["real_depth"] = pin["real_height"] = None
 
@@ -962,10 +1398,17 @@ def main() -> None:
                                     "(is depth leaking into the height axis?)",
                                     class_name, wz, SANE_WORLD_Z_MIN_M, SANE_WORLD_Z_MAX_M)
 
+                # Extract 3D physical surface points (guided by eroded mask)
+                pin["surface_points"] = extract_world_surface_points(
+                    depth_mm, x1, y1, x2, y2, intr, pose_matrix, mask=eroded_mask, max_points=300
+                )
+
                 # Step 5
                 _, pin["instance_id"] = db.add_observation(pin)
                 stats["pins_created"] += 1
                 pins.append(pin)
+
+
 
             if not pins:
                 db.conn.commit()
@@ -994,6 +1437,7 @@ def main() -> None:
                     break
 
             if processed_counter % 25 == 0:
+                db.flush_landmarks()
                 LOG.info("[PROGRESS] frames=%d dets=%d pins=%d landmarks=%d",
                          processed_counter, stats["detections_total"],
                          stats["pins_created"], len(db.landmarks))
@@ -1001,19 +1445,32 @@ def main() -> None:
         LOG.warning("[USER] KeyboardInterrupt - stopping early.")
         interrupted = True
     finally:
+        dedup_count = db.consolidate_landmarks()
+        if dedup_count > 0:
+            LOG.info("[MAP ] Consolidated %d duplicate landmarks across runs.", dedup_count)
         db.flush_landmarks()
         if scene is not None:
+            zone_info = scene.log_navigable_zone()
+            if zone_info is not None:
+                primary_frame = sorted(world_frame_seen)[0] if world_frame_seen else args.world_frame
+                db.save_navigable_zone(zone_info, primary_frame)
+                LOG.info("[ZONE ] Navigable floor zone saved: area=%.2f m², bounds=[%.2f, %.2f]x[%.2f, %.2f]",
+                         zone_info["area_m2"], zone_info["min_x"], zone_info["max_x"], zone_info["min_y"], zone_info["max_y"])
+            consensus_landmarks = {
+                lid: lm for lid, lm in db.landmarks.items()
+                if lm["hit_count"] >= max(1, args.min_consensus_hits)
+            }
             knowledge_base = OntologyKnowledgeBase(Path(args.ontology).resolve())
             knowledge_by_class = {
                 class_name: knowledge_base.resolve(class_name)
-                for class_name in {landmark["class_name"] for landmark in db.landmarks.values()}
+                for class_name in {landmark["class_name"] for landmark in consensus_landmarks.values()}
             }
-            for landmark in db.landmarks.values():
+            for landmark in consensus_landmarks.values():
                 landmark["ontology"] = knowledge_by_class[landmark["class_name"]]
-            scene.log_landmarks(db.landmarks, size_lookup=build_size_lookup())
+            scene.log_landmarks(consensus_landmarks, size_lookup=build_size_lookup())
             scene.finish()
-            LOG.info("[RERUN] Scene written: %d cloud chunks, %d points, %d trajectory poses",
-                     scene.cloud_chunks, scene.points_logged, len(scene.trajectory))
+            LOG.info("[RERUN] Scene written: %d cloud chunks, %d points, %d trajectory poses, %d consensus landmarks",
+                     scene.cloud_chunks, scene.points_logged, len(scene.trajectory), len(consensus_landmarks))
         if writer is not None:
             writer.release()
         cv2.destroyAllWindows()
@@ -1030,11 +1487,15 @@ def main() -> None:
         LOG.info("  %-28s %s", key, value)
     LOG.info("  %-28s %d", "landmarks", len(db.landmarks))
     LOG.info("-" * 78)
-    LOG.info("SEMANTIC MAP (world frame: %s)", ", ".join(sorted(world_frame_seen)) or "none")
+    LOG.info("SEMANTIC MAP (world frame: %s | min consensus: >= %d hits)",
+             ", ".join(sorted(world_frame_seen)) or "none", args.min_consensus_hits)
     for lid, lm in sorted(db.landmarks.items(), key=lambda kv: kv[1]["class_name"]):
-        LOG.info("  %-22s (%8.3f, %8.3f, %8.3f)  hits=%-4d conf=%.2f",
-                 f"{lm['class_name']} {lm['instance_id']}", lm["X"], lm["Y"], lm["Z"],
-                 lm["hit_count"], lm["conf_sum"] / max(1, lm["hit_count"]))
+        score_str = f" cons={lm['consensus_score']:.0%}" if lm.get("consensus_score") is not None else ""
+        is_floor = lm["class_name"].strip().lower() in ("floor", "navigable_floor")
+        name_str = "Floor" if is_floor else f"{lm['class_name']} {lm['instance_id']}"
+        LOG.info("  %-22s (%8.3f, %8.3f, %8.3f)  hits=%-4d conf=%.2f%s",
+                 name_str, lm["X"], lm["Y"], lm["Z"],
+                 lm["hit_count"], lm["conf_sum"] / max(1, lm["hit_count"]), score_str)
     LOG.info("=" * 78)
 
     manifest = {
@@ -1068,6 +1529,7 @@ def main() -> None:
             "depth_gate_enabled": not args.disable_depth_gate,
             "detector_device": None if detector is None else detector.device,
             "rerun_only": args.rerun_only,
+            "min_consensus_hits": args.min_consensus_hits,
         },
         "stats": stats,
         "landmark_count": len(db.landmarks),

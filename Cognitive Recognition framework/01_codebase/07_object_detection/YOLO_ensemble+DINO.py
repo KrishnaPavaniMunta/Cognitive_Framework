@@ -47,6 +47,7 @@ YOLO_CLASS_THRESHOLDS = {
     "door": 0.30,
     "exit_sign": 0.35,
     "bin": 0.30,
+    "reception_counter": 0.60,
 }
 
 # ── Core Filter List ───────────────────────────────────────────────────────────

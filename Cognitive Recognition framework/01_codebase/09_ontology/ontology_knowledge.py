@@ -21,11 +21,13 @@ CLASS_ALIASES = {
     "yellow_bin": "waste_bin",
     "bin_tiger_stripe": "waste_bin",
     "patient": "Patient",
+    "navigable_floor": "floor",
 }
 
 EXTENSION_CLASSES = {
     "medical_tray": ("MedicalDevice", "Steel/plastic instrument tray (semantic-map-bridge extension class)."),
     "waste_bin": ("Infrastructure", "General/yellow/tiger-stripe hospital waste bin (semantic-map-bridge extension class)."),
+    "floor": ("SpatialContext", "Navigable ground surface / floor space (semantic-map-bridge extension class)."),
 }
 
 

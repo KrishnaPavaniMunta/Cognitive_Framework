@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 import sys
 import webbrowser
@@ -50,7 +51,7 @@ def load_landmarks(conn: sqlite3.Connection, min_hits: int, classes: set[str] | 
     required = ["landmark_id", "class_name", "world_frame", "X", "Y", "Z", "hit_count", "mean_confidence"]
     optional = [
         "instance_id", "max_confidence", "first_seen_ns", "last_seen_ns", "first_seen", "last_seen",
-        "measured_width", "measured_depth", "measured_height",
+        "measured_width", "measured_depth", "measured_height", "class_votes_json", "consensus_score",
     ]
     selected = required + [column for column in optional if column in available]
     rows = conn.execute(
@@ -72,6 +73,15 @@ def load_landmarks(conn: sqlite3.Connection, min_hits: int, classes: set[str] | 
         landmark.setdefault("measured_width", None)
         landmark.setdefault("measured_depth", None)
         landmark.setdefault("measured_height", None)
+        votes_raw = landmark.get("class_votes_json")
+        if votes_raw:
+            try:
+                landmark["class_votes"] = json.loads(votes_raw)
+            except Exception:
+                landmark["class_votes"] = None
+        else:
+            landmark["class_votes"] = None
+        landmark.setdefault("consensus_score", 1.0)
 
     # Fallback to observations table if measured_width not in semantic_map or is None
     obs_cols = {row[1] for row in conn.execute("PRAGMA table_info(observations)")}
@@ -104,6 +114,30 @@ def attach_ontology_knowledge(landmarks: list[dict], knowledge_base: OntologyKno
         landmark["ontology"] = knowledge_by_class[landmark["class_name"]]
 
 
+def load_navigable_zones(conn: sqlite3.Connection) -> list[dict]:
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if "navigable_zones" not in tables:
+        return []
+    rows = conn.execute(
+        "SELECT zone_id, zone_name, world_frame, min_x, max_x, min_y, max_y, elevation_z, area_m2, point_count, polygon_json FROM navigable_zones"
+    ).fetchall()
+    zones = []
+    for r in rows:
+        poly = []
+        if r[10]:
+            try:
+                poly = json.loads(r[10])
+            except Exception:
+                pass
+        zones.append({
+            "zone_id": r[0], "zone_name": r[1], "world_frame": r[2],
+            "min_x": r[3], "max_x": r[4], "min_y": r[5], "max_y": r[6],
+            "elevation_z": r[7], "area_m2": r[8], "point_count": r[9],
+            "polygon": poly,
+        })
+    return zones
+
+
 def refresh_semantic_map_html(db_path: Path, ontology_path: Path = DEFAULT_ONTOLOGY) -> Path:
     """Overwrite the one current HTML snapshot from the persistent map database."""
     from semantic_map_html import build_figure, write_html
@@ -112,11 +146,12 @@ def refresh_semantic_map_html(db_path: Path, ontology_path: Path = DEFAULT_ONTOL
     try:
         landmarks = load_landmarks(conn, 1, None)
         trajectory = load_camera_poses(conn)
+        navigable_zones = load_navigable_zones(conn)
     finally:
         conn.close()
     attach_ontology_knowledge(landmarks, OntologyKnowledgeBase(ontology_path.resolve()))
     output_path = write_html(
-        build_figure(landmarks, trajectory, f"{db_path.parent.name} | ontology semantic map"),
+        build_figure(landmarks, trajectory, f"{db_path.parent.name} | ontology semantic map", navigable_zones=navigable_zones),
         db_path.parent / CURRENT_HTML_NAME,
         str(db_path),
     )
@@ -157,7 +192,8 @@ def render(landmarks: list[dict], observations: list[dict], title: str, save_pat
     for lm in landmarks:
         color = palette[lm["class_name"]]
         size = 40 + 8 * min(lm["hit_count"], 40)
-        label = f"{lm['class_name']} {lm['instance_id']}"
+        is_floor = lm["class_name"].strip().lower() in ("floor", "navigable_floor")
+        label = "Floor" if is_floor else f"{lm['class_name']} {lm['instance_id']}"
 
         ax3d.scatter(lm["X"], lm["Y"], lm["Z"], color=color, s=size, edgecolors="black", linewidths=0.6, depthshade=False)
         ax3d.plot([lm["X"], lm["X"]], [lm["Y"], lm["Y"]], [0, lm["Z"]], color=color, alpha=0.4, linewidth=1)
@@ -291,8 +327,9 @@ def main() -> None:
         dims_str = ""
         if lm.get("measured_width") and lm.get("measured_height"):
             dims_str = f" [real 3D: {lm['measured_width']:.2f}x{lm.get('measured_depth') or lm['measured_width']:.2f}x{lm['measured_height']:.2f}m]"
+        score_str = f" cons={lm['consensus_score']:.0%}" if lm.get("consensus_score") is not None else ""
         print(f"  {lm['class_name']:<20} {lm['instance_id']:<3} "
-              f"({lm['X']:7.3f}, {lm['Y']:7.3f}, {lm['Z']:7.3f}){dims_str}  hits={lm['hit_count']}")
+              f"({lm['X']:7.3f}, {lm['Y']:7.3f}, {lm['Z']:7.3f}){dims_str}  hits={lm['hit_count']}{score_str}")
 
     if args.html or args.rerun:
         attach_ontology_knowledge(landmarks, OntologyKnowledgeBase(Path(args.ontology).resolve()))

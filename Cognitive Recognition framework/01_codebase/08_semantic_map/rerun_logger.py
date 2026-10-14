@@ -18,11 +18,26 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 import rerun as rr
+
+_OBJECT_DETECTION_DIR = Path(__file__).resolve().parent.parent / "07_object_detection"
+if str(_OBJECT_DETECTION_DIR) not in sys.path:
+    sys.path.insert(0, str(_OBJECT_DETECTION_DIR))
+
+try:
+    from rgbd_3d_filter import estimate_floor_plane
+except Exception:
+    estimate_floor_plane = None
+
+try:
+    from fast_sam_segmenter import overlay_mask_on_frame
+except Exception:
+    overlay_mask_on_frame = None
 
 DEFAULT_BOX_HALF_SIZE_M = 0.25
 MIN_CLOUD_DEPTH_M = 0.25
@@ -64,12 +79,21 @@ def matrix_to_translation_quaternion(matrix) -> tuple[list[float], list[float]]:
 
 
 def class_color(class_name: str) -> list[int]:
+    name_lower = str(class_name).strip().lower()
+    if name_lower in ("floor", "navigable_floor", "ground", "navigable floor"):
+        return [120, 160, 140]
+
+    if "spill" in name_lower:
+        return [255, 20, 147]  # Vivid deep pink for spillages
     h = abs(hash(class_name))
     return [80 + (h & 0x7F), 80 + ((h >> 8) & 0x7F), 80 + ((h >> 16) & 0x7F)]
 
 
 def stable_landmark_path(landmark: dict, landmark_id: int | None = None) -> str:
-    class_slug = re.sub(r"[^a-z0-9_-]+", "_", str(landmark["class_name"]).lower()).strip("_") or "unknown"
+    class_name = str(landmark.get("class_name", "")).strip()
+    if class_name.lower() in ("floor", "navigable_floor"):
+        return "world/zones/floor"
+    class_slug = re.sub(r"[^a-z0-9_-]+", "_", class_name.lower()).strip("_") or "unknown"
     resolved_id = landmark.get("landmark_id", landmark_id)
     if resolved_id is None:
         raise ValueError("A landmark_id is required for a stable Rerun entity path")
@@ -94,15 +118,27 @@ def landmark_metadata(landmark: dict, landmark_id: int | None = None) -> dict:
         except (ValueError, TypeError):
             has_real = False
 
+    consensus_score = landmark.get("consensus_score")
+    class_votes = landmark.get("class_votes")
+    if class_votes:
+        class_votes_str = json.dumps(class_votes, sort_keys=True)
+    elif landmark.get("class_votes_json"):
+        class_votes_str = str(landmark["class_votes_json"])
+    else:
+        class_votes_str = None
+
+    is_floor = str(landmark.get("class_name", "")).strip().lower() in ("floor", "navigable_floor")
     values = {
         "landmark_id": landmark.get("landmark_id", landmark_id),
-        "map_class": landmark["class_name"],
-        "instance_id": landmark.get("instance_id"),
+        "map_class": "Floor" if is_floor else landmark["class_name"],
+        "instance_id": None if is_floor else landmark.get("instance_id"),
         "world_frame": landmark.get("world_frame"),
         "allowed_in_space": "UNKNOWN",
         "hit_count": landmark.get("hit_count"),
         "mean_confidence": mean_confidence,
         "max_confidence": landmark.get("max_confidence"),
+        "consensus_score": round(float(consensus_score), 3) if consensus_score is not None else None,
+        "class_votes": class_votes_str,
         "first_observed": landmark.get("first_seen") or landmark.get("first_seen_ns"),
         "last_observed": landmark.get("last_seen") or landmark.get("last_seen_ns"),
         "dimension_source": "camera_measured" if has_real else "ontology_typical",
@@ -189,9 +225,9 @@ class AnnotationManager:
     """Manages class ID mappings and Rerun AnnotationContext."""
 
     def __init__(self, initial_classes: list[str] | None = None) -> None:
-        self.class_to_id: dict[str, int] = {}
-        self.id_to_name: dict[int, str] = {0: "Background"}
-        self._next_id = 1
+        self.class_to_id: dict[str, int] = {"Floor": 1}
+        self.id_to_name: dict[int, str] = {0: "Background", 1: "Floor"}
+        self._next_id = 2
         if initial_classes:
             for name in initial_classes:
                 self.get_id(name)
@@ -200,6 +236,10 @@ class AnnotationManager:
         clean_name = str(class_name).strip()
         if not clean_name:
             return 0
+        if clean_name.lower() == "background":
+            return 0
+        if clean_name.lower() in ("floor", "navigable_floor", "ground"):
+            return 1
         if clean_name not in self.class_to_id:
             cid = self._next_id
             self._next_id += 1
@@ -211,9 +251,13 @@ class AnnotationManager:
         return self.id_to_name.get(class_id, "unknown")
 
     def build_context(self) -> rr.AnnotationContext:
-        entries = [(0, "Background", (160, 160, 160))]
-        for name, cid in self.class_to_id.items():
-            entries.append((cid, name, class_color(name)))
+        entries = [
+            (0, "Background", (160, 160, 160)),
+            (1, "Floor", class_color("Floor")),
+        ]
+        for name, cid in sorted(self.class_to_id.items(), key=lambda kv: kv[1]):
+            if cid > 1:
+                entries.append((cid, name, class_color(name)))
         return rr.AnnotationContext(entries)
 
 
@@ -236,29 +280,86 @@ def get_default_annotation_manager(classes: list[str] | None = None) -> Annotati
     return AnnotationManager(initial)
 
 
+def synthesize_surface_points(center: np.ndarray, half_size: list[list[float]], class_name: str, num_points: int = 500) -> np.ndarray:
+    """
+    Synthesize dense 3D physical surface points covering the measured extents of the object
+    when real neural-mask surface points were not captured.
+    half_size is [[half_d, half_w, half_h]] in ROS world coordinates.
+    """
+    cx, cy, cz = float(center[0, 0]), float(center[0, 1]), float(center[0, 2])
+    hd, hw, hh = float(half_size[0][0]), float(half_size[0][1]), float(half_size[0][2])
+    cname = class_name.lower().strip()
+
+    # Planar objects (doors, hazmat signs, radiators): dense surface planes
+    if "door" in cname or "radiator" in cname or "sign" in cname:
+        ys = np.random.uniform(cy - hw, cy + hw, num_points)
+        zs = np.random.uniform(cz - hh, cz + hh, num_points)
+        xs = np.random.uniform(cx - max(0.04, hd * 0.25), cx + max(0.04, hd * 0.25), num_points)
+        return np.column_stack([xs, ys, zs]).astype(np.float32)
+
+    # Horizontal planar objects (spillage, puddle): flat puddle on floor
+    if "spill" in cname or "floor" in cname:
+        theta = np.random.uniform(0, 2 * np.pi, num_points)
+        r = np.sqrt(np.random.uniform(0, 1, num_points))
+        xs = cx + r * hd * np.cos(theta)
+        ys = cy + r * hw * np.sin(theta)
+        zs = np.random.uniform(cz - 0.02, cz + 0.02, num_points)
+        return np.column_stack([xs, ys, zs]).astype(np.float32)
+
+    # Volumetric 3D objects (tables, chairs, bins, cabinets): 3D surface shell
+    u = np.random.uniform(-1, 1, (num_points, 3))
+    face = np.random.randint(0, 3, num_points)
+    sign = np.random.choice([-1, 1], num_points)
+    u[np.arange(num_points), face] = sign
+    xs = cx + u[:, 0] * hd
+    ys = cy + u[:, 1] * hw
+    zs = cz + u[:, 2] * hh
+    return np.column_stack([xs, ys, zs]).astype(np.float32)
+
+
 def log_landmark_entities(landmarks, size_lookup=None) -> None:
     items = landmarks.items() if isinstance(landmarks, dict) else (
         (landmark.get("landmark_id"), landmark) for landmark in landmarks
     )
     for landmark_id, landmark in items:
         center = np.asarray([[landmark["X"], landmark["Y"], landmark["Z"]]], dtype=np.float32)
-        label = f"{landmark['class_name']} {landmark['instance_id']}"
+        is_floor = str(landmark.get("class_name", "")).strip().lower() in ("floor", "navigable_floor")
+        label = "Floor" if is_floor else f"{landmark['class_name']} {landmark['instance_id']}"
         color = [class_color(landmark["class_name"])]
         half_size = resolve_box_half_size(landmark, size_lookup=size_lookup)
+        path = stable_landmark_path(landmark, landmark_id)
 
+        # 1. 3D Physical Surface Point Cloud (primary representation in Rerun)
+        pts = landmark.get("surface_points")
+        if pts is None or len(pts) < 10:
+            pts = synthesize_surface_points(center, half_size, landmark["class_name"], num_points=600)
+
+        pts_arr = np.asarray(pts, dtype=np.float32)
+        # Log 3D physical object with dense splats and the landmark label
         rr.log(
-            stable_landmark_path(landmark, landmark_id),
-            rr.Points3D(center, colors=color, labels=[label], radii=0.06),
-            rr.Boxes3D(
-                centers=center,
-                half_sizes=np.asarray(half_size, dtype=np.float32),
+            path,
+            rr.Points3D(
+                pts_arr,
+                colors=[color[0]] * len(pts_arr),
                 labels=[label],
-                colors=color,
-                fill_mode="TransparentFillMajorWireframe",
+                radii=0.028,
             ),
             rr.AnyValues(**landmark_metadata(landmark, landmark_id)),
             static=True,
         )
+
+        # 2. Bounding box under child entity (no labels so no floating cuboid clutter)
+        rr.log(
+            f"{path}/bounds",
+            rr.Boxes3D(
+                centers=center,
+                half_sizes=np.asarray(half_size, dtype=np.float32),
+                colors=color,
+                fill_mode="MajorWireframe",
+            ),
+            static=True,
+        )
+
 
 
 class RerunSceneLogger:
@@ -282,6 +383,10 @@ class RerunSceneLogger:
         self.cloud_chunks = 0
         self.points_logged = 0
         self.annotation_manager = get_default_annotation_manager()
+        self.floor_points_xy: list[np.ndarray] = []
+        self.floor_z_sum: float = 0.0
+        self.floor_z_count: int = 0
+        self._zone_logged: bool = False
 
         rr.init(application_id, spawn=spawn_viewer)
         recording_path.parent.mkdir(parents=True, exist_ok=True)
@@ -328,6 +433,11 @@ class RerunSceneLogger:
             class_name = str(detection["class_name"])
             confidence = float(detection.get("confidence") or 0.0)
             color = tuple(int(channel) for channel in class_color(class_name))
+
+            mask = detection.get("mask")
+            if overlay_mask_on_frame is not None and mask is not None and np.any(mask):
+                overlay_mask_on_frame(annotated_rgb, mask, color, alpha=0.40, draw_contour=True)
+
             label = f"{class_name} {confidence:.0%}"
             cv2.rectangle(annotated_rgb, (x1, y1), (x2, y2), color, 2)
             text_y = y1 - 7 if y1 >= 22 else y1 + 18
@@ -406,6 +516,44 @@ class RerunSceneLogger:
 
                 class_ids[mask] = cid
 
+        # Floor detection and semantic labeling
+        floor_cid = self.annotation_manager.get_id("Floor")
+        floor_mask = np.zeros(len(z), dtype=bool)
+
+        if estimate_floor_plane is not None:
+            plane = estimate_floor_plane(depth_mm, intrinsics)
+            if plane is not None:
+                normal, d = plane
+                cam_pts = np.column_stack([x, y, z])
+                plane_dist = np.abs(cam_pts @ normal + d)
+                floor_mask = plane_dist <= 0.045
+
+        world_z = points_world[:, 2]
+        cam_world_z = float(pose_matrix[2, 3]) if pose_matrix is not None else 0.35
+        # Camera is mounted on mobile base at Z ~ 0.35m. If camera height is sane, world Z near 0 is ground.
+        if 0.15 <= cam_world_z <= 2.50:
+            ground_z_mask = (world_z >= -0.10) & (world_z <= 0.12)
+            if np.any(floor_mask):
+                floor_mask = floor_mask & ground_z_mask
+            else:
+                floor_mask = ground_z_mask & (v_pts >= intrinsics.cy)
+
+        # Object detections take precedence: floor only claims unassigned points
+        floor_mask = floor_mask & (class_ids == 0)
+        class_ids[floor_mask] = floor_cid
+
+        # Accumulate floor points for the navigable zone representation
+        if np.any(floor_mask):
+            pts_floor = points_world[floor_mask]
+            if len(pts_floor) > 600:
+                idx = np.random.choice(len(pts_floor), 600, replace=False)
+                sampled_floor = pts_floor[idx]
+            else:
+                sampled_floor = pts_floor
+            self.floor_points_xy.append(sampled_floor[:, :2].astype(np.float32))
+            self.floor_z_sum += float(np.sum(pts_floor[:, 2]))
+            self.floor_z_count += len(pts_floor)
+
         rr.log(
             f"world/map/cloud_{self.cloud_chunks:05d}",
             rr.Points3D(
@@ -417,7 +565,7 @@ class RerunSceneLogger:
             static=True,
         )
 
-        semantic_mask = class_ids > 0
+        semantic_mask = class_ids >= 2
         if np.any(semantic_mask):
             sem_pts = points_world[semantic_mask].astype(np.float32)
             sem_cids = class_ids[semantic_mask]
@@ -436,6 +584,86 @@ class RerunSceneLogger:
         self.cloud_chunks += 1
         self.points_logged += int(points_world.shape[0])
 
+    def log_navigable_zone(self, grid_res_m: float = 0.15) -> dict | None:
+        """Publishes the discovered navigable floor zone as a 3D boundary and bounding box in Rerun."""
+        if self._zone_logged or not self.floor_points_xy:
+            return None
+
+        all_xy = np.vstack(self.floor_points_xy)
+        if len(all_xy) < 10:
+            return None
+
+        self._zone_logged = True
+
+        # Voxel grid filter for clean boundary and uniform footprint
+        grid_coords = np.round(all_xy / grid_res_m).astype(np.int64)
+        _, unique_indices = np.unique(grid_coords, axis=0, return_index=True)
+        filtered_xy = all_xy[unique_indices]
+
+        min_x, min_y = float(np.min(filtered_xy[:, 0])), float(np.min(filtered_xy[:, 1]))
+        max_x, max_y = float(np.max(filtered_xy[:, 0])), float(np.max(filtered_xy[:, 1]))
+        center_x = (min_x + max_x) / 2.0
+        center_y = (min_y + max_y) / 2.0
+        extent_x = max(0.1, max_x - min_x)
+        extent_y = max(0.1, max_y - min_y)
+        elevation_z = (self.floor_z_sum / max(1, self.floor_z_count)) if self.floor_z_count > 0 else 0.0
+
+        area_m2 = float(len(unique_indices) * (grid_res_m ** 2))
+
+        # 2D Convex hull of the navigable footprint
+        hull_pts_2d = None
+        if len(filtered_xy) >= 3:
+            hull = cv2.convexHull(filtered_xy.astype(np.float32))
+            if hull is not None and len(hull) >= 3:
+                hull_pts_2d = hull.reshape(-1, 2)
+                # Close the polygon loop
+                hull_closed = np.vstack([hull_pts_2d, hull_pts_2d[0]])
+                hull_3d = np.column_stack([hull_closed, np.full(len(hull_closed), elevation_z, dtype=np.float32)])
+                rr.log(
+                    "world/zones/navigable_boundary",
+                    rr.LineStrips3D([hull_3d], colors=[[100, 180, 140]], radii=0.035),
+                    static=True,
+                )
+
+        # 3D bounding box representing the navigable zone (labeled 'Floor' without any ID)
+        rr.log(
+            "world/zones/navigable_floor",
+            rr.Boxes3D(
+                centers=[[center_x, center_y, elevation_z]],
+                half_sizes=[[extent_x / 2.0, extent_y / 2.0, 0.02]],
+                colors=[[100, 180, 140]],
+                labels=["Floor"],
+                fill_mode="TransparentFillMajorWireframe",
+            ),
+            rr.AnyValues(
+                name="Floor",
+                zone_type="navigable_zone",
+                area_m2=round(area_m2, 2),
+                elevation_z_m=round(elevation_z, 3),
+                min_x=round(min_x, 3), max_x=round(max_x, 3),
+                min_y=round(min_y, 3), max_y=round(max_y, 3),
+                point_count=int(self.floor_z_count),
+            ),
+            static=True,
+        )
+
+        zone_info = {
+            "zone_name": "Floor",
+            "min_x": min_x,
+            "max_x": max_x,
+            "min_y": min_y,
+            "max_y": max_y,
+            "center_x": center_x,
+            "center_y": center_y,
+            "extent_x": extent_x,
+            "extent_y": extent_y,
+            "elevation_z": elevation_z,
+            "area_m2": area_m2,
+            "point_count": int(self.floor_z_count),
+            "polygon": hull_pts_2d.tolist() if hull_pts_2d is not None else [[min_x, min_y], [max_x, min_y], [max_x, max_y], [min_x, max_y]],
+        }
+        return zone_info
+
     def log_landmarks(self, landmarks: dict[int, dict], size_lookup=None) -> None:
         """Static labelled points and boxes; call once the map is final."""
         if not landmarks:
@@ -443,6 +671,7 @@ class RerunSceneLogger:
         log_landmark_entities(landmarks, size_lookup=size_lookup)
 
     def finish(self) -> None:
+        self.log_navigable_zone()
         if len(self.trajectory) >= 2:
             rr.log(
                 "world/trajectory",

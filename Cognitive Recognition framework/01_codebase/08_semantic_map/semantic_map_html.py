@@ -25,17 +25,32 @@ def _landmark_payload(landmark: dict) -> dict:
         except (ValueError, TypeError):
             has_real = False
 
+    is_floor = str(landmark.get("class_name", "")).strip().lower() in ("floor", "navigable_floor")
     map_info = {
-        "Class": landmark["class_name"],
-        "Instance ID": int(landmark["instance_id"]),
-        "Landmark ID": int(landmark["landmark_id"]),
+        "Class": "Floor" if is_floor else landmark["class_name"],
         "World frame": landmark["world_frame"],
+        "Hits": landmark.get("hit_count"),
         "X (m)": landmark["X"],
         "Y (m)": landmark["Y"],
         "Z (m)": landmark["Z"],
         "Last observed": landmark.get("last_seen") or landmark.get("last_seen_ns"),
         "Dimension source": "camera_measured" if has_real else "ontology_typical",
     }
+    if not is_floor:
+        map_info["Instance ID"] = int(landmark["instance_id"])
+        map_info["Landmark ID"] = int(landmark["landmark_id"])
+
+    if landmark.get("consensus_score") is not None:
+        map_info["Consensus score"] = f"{float(landmark['consensus_score']):.1%}"
+    class_votes = landmark.get("class_votes")
+    if not class_votes and landmark.get("class_votes_json"):
+        try:
+            class_votes = json.loads(landmark["class_votes_json"])
+        except Exception:
+            class_votes = None
+    if class_votes and isinstance(class_votes, dict):
+        map_info["Class votes"] = ", ".join(f"{k}: {float(v):.1f}" for k, v in sorted(class_votes.items(), key=lambda kv: kv[1], reverse=True))
+
     if has_real:
         map_info["Measured width (m)"] = round(float(real_w), 3)
         map_info["Measured depth (m)"] = round(float(real_d), 3) if real_d is not None else round(float(real_w), 3)
@@ -51,10 +66,31 @@ def build_figure(
     landmarks: list[dict],
     trajectory: list[tuple[float, float, float]],
     title: str,
+    navigable_zones: list[dict] | None = None,
 ) -> go.Figure:
     class_names = sorted({landmark["class_name"] for landmark in landmarks})
     colors = {name: PALETTE[index % len(PALETTE)] for index, name in enumerate(class_names)}
     figure = go.Figure()
+
+    # Render discovered navigable floor zone
+    for zone in navigable_zones or []:
+        poly = zone.get("polygon") or []
+        elev_z = float(zone.get("elevation_z", 0.0))
+        area = float(zone.get("area_m2", 0.0))
+        if poly and len(poly) >= 3:
+            poly_closed = list(poly) + [poly[0]]
+            px = [p[0] for p in poly_closed]
+            py = [p[1] for p in poly_closed]
+            pz = [elev_z for _ in poly_closed]
+            figure.add_trace(
+                go.Scatter3d(
+                    x=px, y=py, z=pz,
+                    mode="lines",
+                    name="Floor (boundary)",
+                    line={"color": "#4fb3a5", "width": 4},
+                    hovertemplate=f"<b>Floor</b><br>Navigable Zone<br>Area: {area:.1f} m²<extra></extra>",
+                )
+            )
 
     if len(trajectory) >= 2:
         figure.add_trace(
@@ -70,33 +106,40 @@ def build_figure(
         )
 
     for class_name in class_names:
+        is_floor = str(class_name).strip().lower() in ("floor", "navigable_floor")
         members = [landmark for landmark in landmarks if landmark["class_name"] == class_name]
         payloads = [json.dumps(_landmark_payload(landmark), ensure_ascii=True) for landmark in members]
+        text_labels = ["Floor" if is_floor else f"{class_name} {landmark['instance_id']}" for landmark in members]
+        color = "#4fb3a5" if is_floor else colors[class_name]
+        hover_template = (
+            "<b>Floor</b><br>"
+            "World: (%{x:.3f}, %{y:.3f}, %{z:.3f}) m<extra></extra>"
+            if is_floor else
+            "<b>%{text}</b><br>Landmark %{customdata[1]}<br>"
+            "Hits: %{customdata[2]}<br>Confidence: %{customdata[3]:.1%}<br>"
+            "World: (%{x:.3f}, %{y:.3f}, %{z:.3f}) m<extra></extra>"
+        )
         figure.add_trace(
             go.Scatter3d(
                 x=[landmark["X"] for landmark in members],
                 y=[landmark["Y"] for landmark in members],
                 z=[landmark["Z"] for landmark in members],
                 mode="markers+text",
-                name=class_name,
-                text=[f"{class_name} {landmark['instance_id']}" for landmark in members],
+                name="Floor" if is_floor else class_name,
+                text=text_labels,
                 textposition="top center",
                 textfont={"size": 10},
                 marker={
                     "size": [max(7, min(18, 7 + landmark["hit_count"] ** 0.5)) for landmark in members],
-                    "color": colors[class_name],
+                    "color": color,
                     "opacity": 0.92,
                     "line": {"color": "#111820", "width": 1},
                 },
                 customdata=[
-                    [payload, landmark["landmark_id"], landmark["hit_count"], landmark["mean_confidence"]]
+                    [payload, landmark.get("landmark_id", 0), landmark.get("hit_count", 1), float(landmark.get("mean_confidence") or 1.0)]
                     for payload, landmark in zip(payloads, members)
                 ],
-                hovertemplate=(
-                    "<b>%{text}</b><br>Landmark %{customdata[1]}<br>"
-                    "Hits: %{customdata[2]}<br>Confidence: %{customdata[3]:.1%}<br>"
-                    "World: (%{x:.3f}, %{y:.3f}, %{z:.3f}) m<extra></extra>"
-                ),
+                hovertemplate=hover_template,
             )
         )
 
@@ -181,8 +224,9 @@ plot.on("plotly_click", event => {
   const payload = JSON.parse(point.customdata[0]);
   const knowledge = payload.ontology;
   document.getElementById("empty").style.display = "none";
-  document.getElementById("heading").textContent = `${payload.map.Class} ${payload.map["Instance ID"]}`;
-    const mapRows = Object.entries(payload.map).map(([key, value]) => [key, typeof value === "number" && !key.includes("ID") ? Number(value).toFixed(4) : value]);
+  const isFloor = String(payload.map.Class).toLowerCase().includes("floor");
+  document.getElementById("heading").textContent = isFloor ? "Floor" : `${payload.map.Class} ${payload.map["Instance ID"] || ""}`.trim();
+  const mapRows = Object.entries(payload.map).map(([key, value]) => [key, typeof value === "number" && !key.includes("ID") ? Number(value).toFixed(4) : value]);
   const classRows = [
         ["Object type", knowledge.object_type],
         ["Allowed in this space", "UNKNOWN"]
