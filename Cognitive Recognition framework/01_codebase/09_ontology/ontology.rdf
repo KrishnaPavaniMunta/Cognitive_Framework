@@ -644,7 +644,7 @@
 
     <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#chair">
         <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#Furniture"/>
-        <classes-ontology:physicalDimensions>{"typical":{"width":0.45,"depth":0.45,"height":0.9},"range":{"width":[0.36,0.54],"depth":[0.36,0.54],"height":[0.72,1.08]}}</classes-ontology:physicalDimensions>
+        <classes-ontology:physicalDimensions>{"typical":{"width":0.5,"depth":0.5,"height":0.85},"range":{"width":[0.25,0.7],"depth":[0.15,0.7],"height":[0.38,1.2]}}</classes-ontology:physicalDimensions>
         <rdfs:comment>Typical dimensions ≈ 45 × 90 × 45 cm</rdfs:comment>
     </owl:Class>
     
@@ -1004,7 +1004,7 @@
 
     <owl:Class rdf:about="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#wheelchair">
         <rdfs:subClassOf rdf:resource="http://www.semanticweb.org/chevi/ontologies/2026/5/untitled-ontology-6#MedicalDevice"/>
-        <classes-ontology:physicalDimensions>{"typical":{"width":0.65,"depth":1.05,"height":0.9},"range":{"width":[0.52,0.78],"depth":[0.84,1.26],"height":[0.72,1.08]}}</classes-ontology:physicalDimensions>
+        <classes-ontology:physicalDimensions>{"typical":{"width":0.65,"depth":1.0,"height":0.9},"range":{"width":[0.45,0.85],"depth":[0.35,1.3],"height":[0.65,1.2]}}</classes-ontology:physicalDimensions>
         <rdfs:comment>Typical dimensions ≈ 65 × 90 × 105 cm (W × H × L)</rdfs:comment>
     </owl:Class>
     

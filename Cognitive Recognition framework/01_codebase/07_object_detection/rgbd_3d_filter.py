@@ -152,12 +152,12 @@ def load_dimensions_config(dimensions_config_path: str | Path) -> dict[str, dict
     return parsed
 
 
-def _backproject_depth_points(depth_mm, x1, y1, x2, y2, intrinsics, min_points=20, erosion_pixels=2, mask=None):
+def _backproject_depth_points(depth_mm, x1, y1, x2, y2, intrinsics, min_points=10, erosion_pixels=2, mask=None):
     """
     Step 1 & 2 of the Architecture:
     1. Extract ROI (optionally constrained by neural segmentation mask) and isolate foreground depth cluster.
-    2. Erode binary mask by 2 pixels to strip flying depth pixels off object edges.
-    3. Backproject only the clean surface points into 3D.
+    2. Valid-depth masking: filter invalid/zero depth, use median depth to resist background bleed through mesh.
+    3. Backproject physical surface points into 3D.
     """
     h_img, w_img = depth_mm.shape[:2]
     x1, y1 = max(0, int(x1)), max(0, int(y1))
@@ -169,7 +169,7 @@ def _backproject_depth_points(depth_mm, x1, y1, x2, y2, intrinsics, min_points=2
     depth_roi = depth_mm[y1:y2, x1:x2].astype(np.float32)
     x_indices, y_indices = np.meshgrid(np.arange(x1, x2), np.arange(y1, y2))
 
-    valid_mask = np.isfinite(depth_roi) & (depth_roi > 100) & (depth_roi < 8000)
+    valid_mask = np.isfinite(depth_roi) & (depth_roi >= 250.0) & (depth_roi <= 6500.0)
     if mask is not None:
         mask_roi = mask[y1:y2, x1:x2]
         valid_mask = valid_mask & (mask_roi > 0)
@@ -178,19 +178,18 @@ def _backproject_depth_points(depth_mm, x1, y1, x2, y2, intrinsics, min_points=2
         return None
 
     valid_depths = depth_roi[valid_mask]
-    # Isolate foreground cluster (30th percentile represents nearest solid physical surface)
-    z_fg = float(np.percentile(valid_depths, 30))
-    fg_mask = valid_mask & (np.abs(depth_roi - z_fg) <= 300.0)
+    # Median depth naturally resists wall bleed through mesh/gaps
+    z_med = float(np.median(valid_depths))
+    fg_mask = valid_mask & (np.abs(depth_roi - z_med) <= 450.0)
 
-    # 2px morphological erosion to strip flying pixels and noisy boundary edges
-    if erosion_pixels > 0 and int(np.sum(fg_mask)) > 40:
+    # Mild erosion only when no neural mask was provided (neural masks are already precise)
+    if mask is None and erosion_pixels > 0 and int(np.sum(fg_mask)) > 40:
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        eroded = cv2.erode(fg_mask.astype(np.uint8), kernel, iterations=int(erosion_pixels))
+        eroded = cv2.erode(fg_mask.astype(np.uint8), kernel, iterations=1)
         if int(np.sum(eroded)) >= int(min_points):
             fg_mask = (eroded > 0)
 
     if int(np.sum(fg_mask)) < int(min_points):
-        # Fallback to general valid mask if foreground cluster was too small
         fg_mask = valid_mask
 
     z_m = depth_roi[fg_mask] / 1000.0
@@ -417,6 +416,11 @@ def apply_depth_size_filter(
                 continue
 
         if not enable_bin_physical_gating and base_name in {"bin", "general_bin", "yellow_bin", "bin_tiger_stripe"}:
+            filtered.append((x1, y1, x2, y2, conf, name))
+            continue
+
+        # Chairs are exempt from physical dimension gating (variable orientations, occlusions, side views)
+        if base_name == "chair":
             filtered.append((x1, y1, x2, y2, conf, name))
             continue
 

@@ -280,43 +280,6 @@ def get_default_annotation_manager(classes: list[str] | None = None) -> Annotati
     return AnnotationManager(initial)
 
 
-def synthesize_surface_points(center: np.ndarray, half_size: list[list[float]], class_name: str, num_points: int = 500) -> np.ndarray:
-    """
-    Synthesize dense 3D physical surface points covering the measured extents of the object
-    when real neural-mask surface points were not captured.
-    half_size is [[half_d, half_w, half_h]] in ROS world coordinates.
-    """
-    cx, cy, cz = float(center[0, 0]), float(center[0, 1]), float(center[0, 2])
-    hd, hw, hh = float(half_size[0][0]), float(half_size[0][1]), float(half_size[0][2])
-    cname = class_name.lower().strip()
-
-    # Planar objects (doors, hazmat signs, radiators): dense surface planes
-    if "door" in cname or "radiator" in cname or "sign" in cname:
-        ys = np.random.uniform(cy - hw, cy + hw, num_points)
-        zs = np.random.uniform(cz - hh, cz + hh, num_points)
-        xs = np.random.uniform(cx - max(0.04, hd * 0.25), cx + max(0.04, hd * 0.25), num_points)
-        return np.column_stack([xs, ys, zs]).astype(np.float32)
-
-    # Horizontal planar objects (spillage, puddle): flat puddle on floor
-    if "spill" in cname or "floor" in cname:
-        theta = np.random.uniform(0, 2 * np.pi, num_points)
-        r = np.sqrt(np.random.uniform(0, 1, num_points))
-        xs = cx + r * hd * np.cos(theta)
-        ys = cy + r * hw * np.sin(theta)
-        zs = np.random.uniform(cz - 0.02, cz + 0.02, num_points)
-        return np.column_stack([xs, ys, zs]).astype(np.float32)
-
-    # Volumetric 3D objects (tables, chairs, bins, cabinets): 3D surface shell
-    u = np.random.uniform(-1, 1, (num_points, 3))
-    face = np.random.randint(0, 3, num_points)
-    sign = np.random.choice([-1, 1], num_points)
-    u[np.arange(num_points), face] = sign
-    xs = cx + u[:, 0] * hd
-    ys = cy + u[:, 1] * hw
-    zs = cz + u[:, 2] * hh
-    return np.column_stack([xs, ys, zs]).astype(np.float32)
-
-
 def log_landmark_entities(landmarks, size_lookup=None) -> None:
     items = landmarks.items() if isinstance(landmarks, dict) else (
         (landmark.get("landmark_id"), landmark) for landmark in landmarks
@@ -326,39 +289,37 @@ def log_landmark_entities(landmarks, size_lookup=None) -> None:
         is_floor = str(landmark.get("class_name", "")).strip().lower() in ("floor", "navigable_floor")
         label = "Floor" if is_floor else f"{landmark['class_name']} {landmark['instance_id']}"
         color = [class_color(landmark["class_name"])]
-        half_size = resolve_box_half_size(landmark, size_lookup=size_lookup)
         path = stable_landmark_path(landmark, landmark_id)
 
-        # 1. 3D Physical Surface Point Cloud (primary representation in Rerun)
+        # 3D Physical Surface Point Cloud: strictly physical contour from neural masks and depth
         pts = landmark.get("surface_points")
-        if pts is None or len(pts) < 10:
-            pts = synthesize_surface_points(center, half_size, landmark["class_name"], num_points=600)
-
-        pts_arr = np.asarray(pts, dtype=np.float32)
-        # Log 3D physical object with dense splats and the landmark label
-        rr.log(
-            path,
-            rr.Points3D(
-                pts_arr,
-                colors=[color[0]] * len(pts_arr),
-                labels=[label],
-                radii=0.028,
-            ),
-            rr.AnyValues(**landmark_metadata(landmark, landmark_id)),
-            static=True,
-        )
-
-        # 2. Bounding box under child entity (no labels so no floating cuboid clutter)
-        rr.log(
-            f"{path}/bounds",
-            rr.Boxes3D(
-                centers=center,
-                half_sizes=np.asarray(half_size, dtype=np.float32),
-                colors=color,
-                fill_mode="MajorWireframe",
-            ),
-            static=True,
-        )
+        if pts is not None and len(pts) >= 5:
+            pts_arr = np.asarray(pts, dtype=np.float32)
+            rr.log(
+                path,
+                rr.Points3D(
+                    pts_arr,
+                    colors=[color[0]] * len(pts_arr),
+                    labels=[label],
+                    radii=0.028,
+                ),
+                rr.AnyValues(**landmark_metadata(landmark, landmark_id)),
+                static=True,
+            )
+        else:
+            # If dense surface points were not captured, log only the physical center location with the label.
+            # Never synthesize artificial cuboid/rectangular bounding boxes.
+            rr.log(
+                path,
+                rr.Points3D(
+                    center,
+                    colors=color,
+                    labels=[label],
+                    radii=0.045,
+                ),
+                rr.AnyValues(**landmark_metadata(landmark, landmark_id)),
+                static=True,
+            )
 
 
 
@@ -639,31 +600,18 @@ class RerunSceneLogger:
                 hull_3d = np.column_stack([hull_closed, np.full(len(hull_closed), elevation_z, dtype=np.float32)])
                 rr.log(
                     "world/zones/navigable_boundary",
-                    rr.LineStrips3D([hull_3d], colors=[[100, 180, 140]], radii=0.035),
+                    rr.LineStrips3D([hull_3d], colors=[[100, 180, 140]], radii=0.035, labels=["Floor"]),
+                    rr.AnyValues(
+                        name="Floor",
+                        zone_type="navigable_zone",
+                        area_m2=round(area_m2, 2),
+                        elevation_z_m=round(elevation_z, 3),
+                        min_x=round(min_x, 3), max_x=round(max_x, 3),
+                        min_y=round(min_y, 3), max_y=round(max_y, 3),
+                        point_count=int(self.floor_z_count),
+                    ),
                     static=True,
                 )
-
-        # 3D bounding box representing the navigable zone (labeled 'Floor' without any ID)
-        rr.log(
-            "world/zones/navigable_floor",
-            rr.Boxes3D(
-                centers=[[center_x, center_y, elevation_z]],
-                half_sizes=[[extent_x / 2.0, extent_y / 2.0, 0.02]],
-                colors=[[100, 180, 140]],
-                labels=["Floor"],
-                fill_mode="TransparentFillMajorWireframe",
-            ),
-            rr.AnyValues(
-                name="Floor",
-                zone_type="navigable_zone",
-                area_m2=round(area_m2, 2),
-                elevation_z_m=round(elevation_z, 3),
-                min_x=round(min_x, 3), max_x=round(max_x, 3),
-                min_y=round(min_y, 3), max_y=round(max_y, 3),
-                point_count=int(self.floor_z_count),
-            ),
-            static=True,
-        )
 
         zone_info = {
             "zone_name": "Floor",

@@ -104,30 +104,16 @@ def sample_box_foreground_depth_m(
     mask: np.ndarray | None = None,
 ) -> tuple[float | None, float, float]:
     """
-    Robust depth association:
-    1. First tries the central patch around (u, v) (if mask is None or (u, v) is in mask).
-    2. If that yields no valid depth (common for chairs with hollow spaces or IR dropout),
-       falls back to foreground depth extraction within the neural mask or bounding box ROI:
-       - Samples within neural mask (or inner 80% if mask is None).
-       - Filters valid depth pixels in range [MIN_VALID_DEPTH_M, MAX_VALID_DEPTH_M].
-       - Extracts the 30th percentile depth (nearest physical surface, eliminating wall background bleed).
-       - Re-centers (u, v) on the foreground cluster centroid so 3D ray deprojection hits the physical object.
+    Valid-depth masking for 3D depth association:
+    Instead of relying on the geometric midpoint, extracts all depth values within
+    the specific segmentation mask, filters out invalid or zero-depth pixels, and
+    calculates the median depth of the remaining pixels.
+    The median naturally resists extreme outliers like the background wall shining
+    through mesh, giving the true distance to the physical material.
+    Re-centers (u, v) on the median pixel coordinates of the valid physical surface.
     Returns: (z_m, adjusted_u, adjusted_v)
     """
     h_img, w_img = depth_mm.shape[:2]
-    u_int, v_int = int(round(u)), int(round(v))
-
-    # 1. Try standard center patch first if point falls inside mask
-    center_in_mask = True
-    if mask is not None and 0 <= u_int < w_img and 0 <= v_int < h_img:
-        center_in_mask = bool(mask[v_int, u_int] > 0)
-
-    if center_in_mask:
-        z_m = sample_depth_m(depth_mm, u_int, v_int, half=half)
-        if z_m is not None:
-            return z_m, u, v
-
-    # 2. Fallback: foreground ROI / neural mask depth extraction
     x1, y1, x2, y2 = bbox_xyxy
     bx1, by1 = max(0, int(x1)), max(0, int(y1))
     bx2, by2 = min(w_img, int(x2)), min(h_img, int(y2))
@@ -139,55 +125,60 @@ def sample_box_foreground_depth_m(
     min_d_mm = MIN_VALID_DEPTH_M * 1000.0
     max_d_mm = MAX_VALID_DEPTH_M * 1000.0
 
-    # If neural mask is provided, isolate foreground strictly within the mask ROI
+    # 1. Neural segmentation mask valid-depth extraction
     if mask is not None:
         depth_roi = depth_mm[by1:by2, bx1:bx2].astype(np.float32)
         mask_roi = mask[by1:by2, bx1:bx2] > 0
-        valid_mask = np.isfinite(depth_roi) & (depth_roi >= min_d_mm) & (depth_roi <= max_d_mm) & mask_roi
+        valid_mask = mask_roi & np.isfinite(depth_roi) & (depth_roi >= min_d_mm) & (depth_roi <= max_d_mm)
+        if int(np.sum(valid_mask)) >= 10:
+            valid_depths = depth_roi[valid_mask]
+            median_d_mm = float(np.median(valid_depths))
+            z_m = median_d_mm / 1000.0
+
+            # Re-center (u, v) on the physical surface cluster around the median depth
+            surface_cluster = valid_mask & (np.abs(depth_roi - median_d_mm) <= 350.0)
+            if np.any(surface_cluster):
+                ys, xs = np.where(surface_cluster)
+            else:
+                ys, xs = np.where(valid_mask)
+            u_adj = float(bx1 + np.median(xs))
+            v_adj = float(by1 + np.median(ys))
+            return z_m, u_adj, v_adj
+
+    # 2. Fallback if no segmentation mask or mask has insufficient valid depth pixels:
+    # Use bounding box inner region to resist boundary bleeding
+    inner_x1 = max(0, int(bx1 + 0.10 * bw))
+    inner_x2 = min(w_img, int(bx2 - 0.10 * bw))
+    inner_y1 = max(0, int(by1 + 0.10 * bh))
+    inner_y2 = min(h_img, int(by2 - 0.05 * bh))
+    if inner_x2 <= inner_x1 or inner_y2 <= inner_y1:
+        inner_x1, inner_x2 = bx1, bx2
+        inner_y1, inner_y2 = by1, by2
+
+    depth_roi = depth_mm[inner_y1:inner_y2, inner_x1:inner_x2].astype(np.float32)
+    valid_mask = np.isfinite(depth_roi) & (depth_roi >= min_d_mm) & (depth_roi <= max_d_mm)
+    offset_x, offset_y = inner_x1, inner_y1
+
+    if int(np.sum(valid_mask)) < 10:
+        # Try full bounding box
+        depth_roi = depth_mm[by1:by2, bx1:bx2].astype(np.float32)
+        valid_mask = np.isfinite(depth_roi) & (depth_roi >= min_d_mm) & (depth_roi <= max_d_mm)
         offset_x, offset_y = bx1, by1
         if int(np.sum(valid_mask)) < 10:
-            mask = None  # fallback to geometric inner ROI heuristic
-
-    if mask is None:
-        # Focus on inner region to avoid edge boundary bleeding
-        inner_x1 = max(0, int(bx1 + 0.10 * bw))
-        inner_x2 = min(w_img, int(bx2 - 0.10 * bw))
-        inner_y1 = max(0, int(by1 + 0.10 * bh))
-        inner_y2 = min(h_img, int(by2 - 0.05 * bh))
-        if inner_x2 <= inner_x1 or inner_y2 <= inner_y1:
-            inner_x1, inner_x2 = bx1, bx2
-            inner_y1, inner_y2 = by1, by2
-
-        depth_roi = depth_mm[inner_y1:inner_y2, inner_x1:inner_x2].astype(np.float32)
-        valid_mask = np.isfinite(depth_roi) & (depth_roi >= min_d_mm) & (depth_roi <= max_d_mm)
-
-        if int(np.sum(valid_mask)) < 10:
-            # If inner region had too few valid points, try full bounding box
-            depth_roi = depth_mm[by1:by2, bx1:bx2].astype(np.float32)
-            valid_mask = np.isfinite(depth_roi) & (depth_roi >= min_d_mm) & (depth_roi <= max_d_mm)
-            if int(np.sum(valid_mask)) < 10:
-                return None, u, v
-            offset_x, offset_y = bx1, by1
-        else:
-            offset_x, offset_y = inner_x1, inner_y1
+            return None, u, v
 
     valid_depths = depth_roi[valid_mask]
-    # 30th percentile represents the nearest solid surface of the object (e.g. seat/cushion)
-    z_fg_mm = float(np.percentile(valid_depths, 30))
-    z_fg_m = z_fg_mm / 1000.0
-    if not (MIN_VALID_DEPTH_M <= z_fg_m <= MAX_VALID_DEPTH_M):
-        return None, u, v
+    median_d_mm = float(np.median(valid_depths))
+    z_m = median_d_mm / 1000.0
 
-    # Re-center (u, v) on the foreground cluster centroid (within 300mm of z_fg_mm)
-    fg_cluster = valid_mask & (np.abs(depth_roi - z_fg_mm) <= 300.0)
-    if np.any(fg_cluster):
-        ys, xs = np.where(fg_cluster)
-        u_adj = float(np.median(xs)) + offset_x
-        v_adj = float(np.median(ys)) + offset_y
+    surface_cluster = valid_mask & (np.abs(depth_roi - median_d_mm) <= 350.0)
+    if np.any(surface_cluster):
+        ys, xs = np.where(surface_cluster)
     else:
-        u_adj, v_adj = u, v
-
-    return z_fg_m, u_adj, v_adj
+        ys, xs = np.where(valid_mask)
+    u_adj = float(offset_x + np.median(xs))
+    v_adj = float(offset_y + np.median(ys))
+    return z_m, u_adj, v_adj
 
 
 # ── Step 3: de-projection ─────────────────────────────────────────────────────
@@ -1364,7 +1355,7 @@ def main() -> None:
 
                 # Step 2: robust foreground depth association (handles hollow furniture/chairs)
                 z_m, adj_u, adj_v = sample_box_foreground_depth_m(
-                    depth_mm, [x1, y1, x2, y2], pin["u"], pin["v"], mask=eroded_mask
+                    depth_mm, [x1, y1, x2, y2], pin["u"], pin["v"], mask=raw_mask
                 )
                 if z_m is None:
                     stats["rejected_no_depth_value"] += 1
@@ -1377,14 +1368,15 @@ def main() -> None:
                 pin["u"] = adj_u
                 pin["v"] = adj_v
 
-                # Measure real 3D physical dimensions from camera depth point cloud (guided by eroded mask)
-                dims_3d = get_oriented_3d_dimensions(depth_mm, x1, y1, x2, y2, intr, mask=eroded_mask)
+                # Measure real 3D physical dimensions from camera depth point cloud (guided by raw mask)
+                dims_3d = get_oriented_3d_dimensions(depth_mm, x1, y1, x2, y2, intr, mask=raw_mask)
                 if dims_3d is not None:
                     pin["real_width"], pin["real_depth"], pin["real_height"] = dims_3d
 
                     # Step 3: Physical 3D Geometric Gatekeeper directly from Ontology
                     # Checks measured (rw, rd, rh) against limits loaded from ontology.rdf
-                    if class_name in ontology_limits:
+                    # Chairs are exempt from physical dimension gating (variable orientations, occlusions, side views)
+                    if class_name in ontology_limits and class_name != "chair":
                         lim = ontology_limits[class_name]
                         rw, rd, rh = dims_3d
                         w_ok = lim["min_w"] <= rw <= lim["max_w"]
@@ -1435,9 +1427,9 @@ def main() -> None:
                                     "(is depth leaking into the height axis?)",
                                     class_name, wz, SANE_WORLD_Z_MIN_M, SANE_WORLD_Z_MAX_M)
 
-                # Extract 3D physical surface points (guided by eroded mask)
+                # Extract 3D physical surface points (guided by raw mask)
                 pin["surface_points"] = extract_world_surface_points(
-                    depth_mm, x1, y1, x2, y2, intr, pose_matrix, mask=eroded_mask, max_points=300
+                    depth_mm, x1, y1, x2, y2, intr, pose_matrix, mask=raw_mask, max_points=300
                 )
 
                 # Step 5
