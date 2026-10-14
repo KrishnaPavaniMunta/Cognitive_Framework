@@ -436,13 +436,31 @@ class RerunSceneLogger:
 
             mask = detection.get("mask")
             if overlay_mask_on_frame is not None and mask is not None and np.any(mask):
-                overlay_mask_on_frame(annotated_rgb, mask, color, alpha=0.40, draw_contour=True)
+                overlay_mask_on_frame(annotated_rgb, mask, color, alpha=0.45, draw_contour=True)
 
-            label = f"{class_name} {confidence:.0%}"
             cv2.rectangle(annotated_rgb, (x1, y1), (x2, y2), color, 2)
-            text_y = y1 - 7 if y1 >= 22 else y1 + 18
-            cv2.putText(annotated_rgb, label, (x1, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5, color, 2, cv2.LINE_AA)
+
+            instance_label = f" {detection['instance_id']}" if detection.get("instance_id") is not None else ""
+            head = f"{class_name}{instance_label} {confidence:.0%}"
+            wx, wy, wz = detection.get("world_X"), detection.get("world_Y"), detection.get("world_Z")
+            dm = detection.get("depth_m")
+            if wx is not None and wy is not None and wz is not None:
+                body = f"W({wx:.2f},{wy:.2f},{wz:.2f}) d={dm:.2f}m" if dm is not None else f"W({wx:.2f},{wy:.2f},{wz:.2f})"
+            else:
+                body = f"d={dm:.2f}m" if dm is not None else ""
+
+            (tw1, th1), _ = cv2.getTextSize(head, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+            (tw2, th2), _ = cv2.getTextSize(body, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1) if body else ((0, 0), 0)
+            max_tw = max(tw1, tw2)
+            total_th = th1 + th2 + 6 if body else th1 + 2
+            badge_y1 = max(0, y1 - total_th - 8) if y1 > 35 else y2 + 2
+            badge_y2 = badge_y1 + total_th + 6
+            cv2.rectangle(annotated_rgb, (x1, badge_y1), (min(annotated_rgb.shape[1], x1 + max_tw + 8), badge_y2), (20, 20, 20), -1)
+            cv2.rectangle(annotated_rgb, (x1, badge_y1), (min(annotated_rgb.shape[1], x1 + max_tw + 8), badge_y2), color, 1)
+
+            cv2.putText(annotated_rgb, head, (x1 + 4, badge_y1 + th1 + 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+            if body:
+                cv2.putText(annotated_rgb, body, (x1 + 4, badge_y1 + th1 + th2 + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (230, 230, 230), 1, cv2.LINE_AA)
         rr.log("world/camera/annotated_image", rr.Image(cv2.cvtColor(annotated_rgb, cv2.COLOR_BGR2RGB)))
 
         if frame_index % self.cloud_every_n_frames == 0:
