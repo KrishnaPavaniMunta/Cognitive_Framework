@@ -66,6 +66,7 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
 
     # 3. Log Landmarks with real surface point clouds
     landmarks = conn.execute("SELECT * FROM semantic_map").fetchall()
+    lm_by_label: dict[str, tuple[float, float, float]] = {}
     count = 0
     for row in landmarks:
         lm = dict(row)
@@ -73,9 +74,16 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
         class_name = lm["class_name"]
         instance_id = lm.get("instance_id") or landmark_id
         label = f"{class_name} {instance_id}"
-        color = [class_color(class_name)]
-        path = stable_landmark_path(lm, landmark_id)
         center = np.asarray([[lm["X"], lm["Y"], lm["Z"]]], dtype=np.float32)
+        lm_by_label[label] = (float(lm["X"]), float(lm["Y"]), float(lm["Z"]))
+
+        # Special styling for novel/residual assets
+        if class_name.startswith("novel_") or class_name == "unidentified_obstacle":
+            color = [[245, 166, 35]]  # Amber
+        else:
+            color = [class_color(class_name)]
+
+        path = stable_landmark_path(lm, landmark_id)
 
         surf_raw = lm.get("surface_points_json")
         pts = None
@@ -110,6 +118,44 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
                 static=True,
             )
         count += 1
+
+    # 4. Log 3D Compliance Hazard Lines (Red Proximity Strips)
+    report_path = db_path.with_name("hospital_compliance_report.json")
+    if report_path.exists():
+        try:
+            with open(report_path, "r", encoding="utf-8") as f:
+                comp_data = json.load(f)
+            violations = comp_data.get("violations", [])
+            for v_idx, v in enumerate(violations):
+                rule = v.get("rule_id", "HAZARD")
+                source_label = v.get("object")
+                target_label = v.get("target") or v.get("door")
+                d_val = v.get("measured_distance_m")
+
+                p1 = lm_by_label.get(source_label)
+                p2 = lm_by_label.get(target_label) if target_label else None
+
+                hazard_path = f"world/compliance_hazards/{rule}_{v_idx+1}"
+                if p1 and p2:
+                    # Draw connecting red hazard line between violating object and reference landmark (e.g. door)
+                    strip = np.array([p1, p2], dtype=np.float32)
+                    dist_text = f" ({d_val:.2f}m)" if d_val is not None else ""
+                    rr.log(
+                        hazard_path,
+                        rr.LineStrips3D([strip], colors=[[240, 45, 45]], radii=0.035, labels=[f"VIOLATION: {rule}{dist_text}"]),
+                        static=True,
+                    )
+                elif p1:
+                    # Vertical red hazard alert post above single offending object
+                    p_top = (p1[0], p1[1], p1[2] + 0.40)
+                    strip = np.array([p1, p_top], dtype=np.float32)
+                    rr.log(
+                        hazard_path,
+                        rr.LineStrips3D([strip], colors=[[240, 45, 45]], radii=0.03, labels=[f"VIOLATION: {rule}"]),
+                        static=True,
+                    )
+        except Exception as exc:
+            print(f"Warning: could not log compliance hazards to RRD: {exc}")
 
     conn.close()
     print(f"Exported {count} landmarks and trajectory to {out_rrd} (size: {out_rrd.stat().st_size / 1024:.1f} KB)")

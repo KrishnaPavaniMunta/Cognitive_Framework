@@ -932,10 +932,14 @@ def parse_args() -> argparse.Namespace:
                    help="Rerun point-splat radius in metres (smaller reduces bubble appearance)")
     p.add_argument("--no-rerun-depth-smoothing", action="store_false", dest="rerun_depth_smoothing",
                    help="Use raw depth instead of edge-preserving bilateral smoothing")
-    p.add_argument("--rerun-only", action="store_true",
-                   help="Replay RGB-D and TF into world_map.rrd without running object detection")
     p.add_argument("--ontology", default=str(DEFAULT_ONTOLOGY),
                    help="RDF/OWL ontology embedded as landmark metadata in Rerun")
+    p.add_argument("--enable-residual-discovery", action="store_true", default=True,
+                   help="Run residual 3D DBSCAN clustering and two-tier cognition on keyframes")
+    p.add_argument("--no-residual-discovery", action="store_false", dest="enable_residual_discovery",
+                   help="Disable residual 3D clustering")
+    p.add_argument("--residual-interval", type=int, default=35,
+                   help="Run residual clustering every Nth processed frame (default: 35)")
     p.add_argument("--verbose", action="store_true", help="Print DEBUG lines to the console too")
     args = p.parse_args()
     if args.rerun_only:
@@ -1134,9 +1138,19 @@ def main() -> None:
             LOG.warning("[FastSAM] Could not load FastSAM segmenter: %s. Continuing in bounding box mode.", exc)
             segmenter = None
 
-
-
-    depth_ts = [m.timestamp_ns for m in depth_messages]
+    cognition_engine = None
+    residual_clusterer = None
+    if getattr(args, "enable_residual_discovery", False) and not args.rerun_only:
+        try:
+            from spatial_clustering import ResidualSpatialClustering
+            from two_tier_classifier import TwoTierCognitionEngine
+            cognition_engine = TwoTierCognitionEngine(
+                ontology_path=Path(args.ontology).resolve(),
+                device=args.detector_device,
+            )
+            LOG.info("[DISCOVERY] Two-Tier Residual Cognition active (interval: %d frames)", args.residual_interval)
+        except Exception as exc:
+            LOG.warning("[DISCOVERY] Could not initialize residual cognition: %s", exc)
     cam_ts = [m.timestamp_ns for m in caminfo_messages]
 
     db_path = run_dir / "world_map.db"
@@ -1437,9 +1451,65 @@ def main() -> None:
                 stats["pins_created"] += 1
                 pins.append(pin)
 
+            # Residual 3D DBSCAN Clustering & Two-Tier Cognition (Keyframes)
+            if (cognition_engine is not None and pose_matrix is not None
+                    and (processed_counter % max(1, args.residual_interval) == 0)):
+                if residual_clusterer is None:
+                    residual_clusterer = ResidualSpatialClustering(intr)
 
+                known_regions = []
+                for det_idx, det in enumerate(detections):
+                    if det_idx < len(masks) and masks[det_idx][0] is not None:
+                        known_regions.append(masks[det_idx][0])
+                    else:
+                        known_regions.append(det["bbox_xyxy"])
 
-            if not pins:
+                try:
+                    res_clusters = residual_clusterer.extract_residual_clusters(
+                        rgb_img, depth_mm, known_regions, pose_matrix=pose_matrix
+                    )
+                    for cluster in res_clusters:
+                        c_res = cognition_engine.classify_crop(cluster.crop_rgb)
+                        if c_res.is_novel and c_res.class_name != "unidentified_obstacle":
+                            cognition_engine.ingest_novel_concept(c_res.class_name, dimensions_m=cluster.dimensions_m)
+
+                        c_pin = {
+                            "frame_index": processed_counter,
+                            "timestamp_ns": rgb_item.timestamp_ns,
+                            "class_name": c_res.class_name,
+                            "source_class_name": f"[{c_res.tier}] {c_res.class_name}",
+                            "confidence": c_res.confidence,
+                            "bbox_xyxy": list(cluster.bbox_2d),
+                            "u": (cluster.bbox_2d[0] + cluster.bbox_2d[2]) / 2.0,
+                            "v": (cluster.bbox_2d[1] + cluster.bbox_2d[3]) / 2.0,
+                            "depth_m": cluster.centroid_cam[2],
+                            "cam_X": cluster.centroid_cam[0],
+                            "cam_Y": cluster.centroid_cam[1],
+                            "cam_Z": cluster.centroid_cam[2],
+                            "world_X": cluster.centroid_world[0],
+                            "world_Y": cluster.centroid_world[1],
+                            "world_Z": cluster.centroid_world[2],
+                            "world_frame": world_frame,
+                            "instance_id": None,
+                            "extrinsics_source": extrinsics_source,
+                            "extrinsics_status": extrinsics_status,
+                            "reject_reason": "",
+                            "mask": None,
+                            "eroded_mask": None,
+                            "surface_points": cluster.points_world,
+                            "real_width": cluster.dimensions_m[0],
+                            "real_depth": cluster.dimensions_m[1],
+                            "real_height": cluster.dimensions_m[2],
+                        }
+                        _, c_pin["instance_id"] = db.add_observation(c_pin)
+                        pins.append(c_pin)
+                        stats["pins_created"] += 1
+                        stats["residual_discovered"] = stats.get("residual_discovered", 0) + 1
+                        LOG.debug("      [RESIDUAL] Discovered %s at (%.2f, %.2f, %.2f) dims=%.2fx%.2fx%.2fm",
+                                  c_res.class_name, cluster.centroid_world[0], cluster.centroid_world[1], cluster.centroid_world[2],
+                                  cluster.dimensions_m[0], cluster.dimensions_m[1], cluster.dimensions_m[2])
+                except Exception as exc:
+                    LOG.debug("[DISCOVERY] Error in residual clustering: %s", exc)
                 db.conn.commit()
 
             if pose_matrix is not None:

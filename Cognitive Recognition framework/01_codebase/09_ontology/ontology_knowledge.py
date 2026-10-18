@@ -22,6 +22,7 @@ CLASS_ALIASES = {
     "bin_tiger_stripe": "waste_bin",
     "patient": "Patient",
     "navigable_floor": "floor",
+    "dining table": "dining_table",
 }
 
 EXTENSION_CLASSES = {
@@ -46,7 +47,7 @@ def add_extension_classes(graph: Graph) -> None:
 
 def resolve_class(graph: Graph, class_name: str) -> URIRef:
     """Map a detector class name to an ontology or bridge-extension class URI."""
-    resolved_name = CLASS_ALIASES.get(class_name, class_name)
+    resolved_name = CLASS_ALIASES.get(class_name, class_name).strip().replace(" ", "_")
     for namespace in (CO, UO, BR):
         candidate = namespace[resolved_name]
         if (candidate, RDF.type, OWL.Class) in graph:

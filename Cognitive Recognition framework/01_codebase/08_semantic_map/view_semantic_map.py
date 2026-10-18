@@ -149,11 +149,29 @@ def refresh_semantic_map_html(db_path: Path, ontology_path: Path = DEFAULT_ONTOL
         navigable_zones = load_navigable_zones(conn)
     finally:
         conn.close()
+
+    # Load hospital compliance report if present
+    comp_report = None
+    comp_json_path = db_path.with_name("hospital_compliance_report.json")
+    if comp_json_path.exists():
+        try:
+            with open(comp_json_path, "r", encoding="utf-8") as f:
+                comp_report = json.load(f)
+        except Exception:
+            comp_report = None
+
     attach_ontology_knowledge(landmarks, OntologyKnowledgeBase(ontology_path.resolve()))
     output_path = write_html(
-        build_figure(landmarks, trajectory, f"{db_path.parent.name} | ontology semantic map", navigable_zones=navigable_zones),
+        build_figure(
+            landmarks,
+            trajectory,
+            f"{db_path.parent.name} | ontology semantic map",
+            navigable_zones=navigable_zones,
+            compliance_report=comp_report,
+        ),
         db_path.parent / CURRENT_HTML_NAME,
         str(db_path),
+        compliance_report=comp_report,
     )
     legacy_path = db_path.parent / LEGACY_HTML_NAME
     if legacy_path.exists():

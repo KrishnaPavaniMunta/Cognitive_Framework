@@ -301,3 +301,4 @@ class SpatialSceneGraph:
                     })
 
         return edges
+
