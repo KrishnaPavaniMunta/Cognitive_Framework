@@ -1519,9 +1519,35 @@ def main() -> None:
         cv2.destroyAllWindows()
 
     from view_semantic_map import refresh_semantic_map_html
+    from export_clean_rrd import export_clean_rrd
+    from hospital_compliance import HospitalComplianceEvaluator, generate_markdown_report
 
     html_path = refresh_semantic_map_html(db_path, Path(args.ontology).resolve())
     LOG.info("[HTML ] Current semantic-map viewer written: %s", html_path)
+
+    # 1. Export clean lightweight RRD (<1 MB) for instant sub-second visualization
+    clean_rrd_path = db_path.with_name("semantic_map_clean.rrd")
+    try:
+        export_clean_rrd(db_path, clean_rrd_path)
+        LOG.info("[RERUN] Lightweight scene written: %s", clean_rrd_path)
+    except Exception as exc:
+        LOG.warning("Failed to export clean RRD: %s", exc)
+
+    # 2. Hospital Health & Safety Compliance Audit (KMi Spatial Reasoner)
+    comp_md_path = db_path.with_name("hospital_compliance_report.md")
+    comp_json_path = db_path.with_name("hospital_compliance_report.json")
+    try:
+        compliance_eval = HospitalComplianceEvaluator(db_path)
+        comp_report = compliance_eval.evaluate_all()
+        with open(comp_json_path, "w", encoding="utf-8") as f:
+            json.dump(comp_report, f, indent=2)
+        with open(comp_md_path, "w", encoding="utf-8") as f:
+            f.write(generate_markdown_report(comp_report))
+        comp_status = "COMPLIANT" if comp_report["overall_compliant"] else "NON-COMPLIANT"
+        LOG.info("[AUDIT] Hospital H&S Compliance: %s (%d violations detected) -> %s",
+                 comp_status, comp_report["total_violations"], comp_md_path)
+    except Exception as exc:
+        LOG.warning("Failed to evaluate hospital compliance: %s", exc)
 
     # ── Report ────────────────────────────────────────────────────────────────
     LOG.info("=" * 78)
@@ -1588,7 +1614,9 @@ def main() -> None:
     LOG.info("History  : %s", history_dir / f"{run_id}.json")
     if args.rerun:
         LOG.info("Rerun    : %s", rrd_path)
+    LOG.info("Rerun 3D : %s", clean_rrd_path)
     LOG.info("HTML     : %s", html_path)
+    LOG.info("Audit    : %s", comp_md_path)
     if not args.no_video:
         LOG.info("Preview  : %s", video_path)
 
