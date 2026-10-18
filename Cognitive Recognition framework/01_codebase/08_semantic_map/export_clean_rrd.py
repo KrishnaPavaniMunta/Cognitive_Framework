@@ -124,3 +124,4 @@ if __name__ == "__main__":
 
     out_file = args.out or args.db.with_name("semantic_map_clean.rrd")
     export_clean_rrd(args.db, out_file)
+
