@@ -1,19 +1,24 @@
 """
-Export a lightweight, instant-loading RRD file from world_map.db.
+Export a lightweight, instant-loading canonical RRD file from world_map.db.
 
 Contains:
+- Full 3D environment point cloud (hallway walls, floor, structural background)
 - All consensus landmarks with physical 3D surface point clouds
-- Trajectory path
+- Camera trajectory path
 - Navigable floor boundary
+- 3D Semi-Cylindrical Keep-Clear Egress Volumes on Emergency Fire Exit doors (Green/Red)
+- Compliance hazard lines
 
-Excludes raw video image frames, reducing file size from ~4 GB to <1 MB.
+Excludes heavy raw video frames (1080p images), maintaining fast loading (~5-7 MB).
 """
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
+import shutil
 import sqlite3
+import subprocess
 import sys
 
 import numpy as np
@@ -27,16 +32,52 @@ from rerun_logger import class_color, landmark_metadata, stable_landmark_path
 
 
 def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
+    db_path = Path(db_path).resolve()
+    out_rrd = Path(out_rrd).resolve()
+    run_dir = db_path.parent
+    history_dir = run_dir / "run_history"
+
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
-    rr.init("SemanticMapClean", recording_id="semantic_map_clean")
-    rr.save(str(out_rrd))
+    # 1. Look for existing dense archive RRD with environment point clouds
+    dense_cloud_extracted = False
+    temp_cloud_rrd = run_dir / "_temp_env_cloud.rrd"
+    temp_semantic_rrd = run_dir / "_temp_semantic.rrd"
+
+    # Search for latest archive in run_history
+    archive_candidates = sorted(history_dir.glob("world_map_*.rrd"), key=lambda p: p.stat().st_mtime, reverse=True)
+    rerun_bin = sys.executable.replace("python.exe", "rerun.exe")
+
+    if archive_candidates and Path(rerun_bin).exists():
+        latest_archive = archive_candidates[0]
+        try:
+            # Filter out heavy uncompressed video frames (1080p RGB images)
+            cmd_filter = [
+                str(rerun_bin), "rrd", "filter",
+                "--drop-entity", "/world/camera/annotated_image",
+                "--drop-entity", "/world/camera/image",
+                "-o", str(temp_cloud_rrd),
+                str(latest_archive)
+            ]
+            res = subprocess.run(cmd_filter, capture_output=True, text=True, timeout=30)
+            if res.returncode == 0 and temp_cloud_rrd.exists() and temp_cloud_rrd.stat().st_size > 10000:
+                dense_cloud_extracted = True
+        except Exception as exc:
+            print(f"Warning: could not filter archive point cloud: {exc}")
+
+    # 2. Write semantic landmarks, door keep-clear volumes, and hazards
+    target_write_rrd = temp_semantic_rrd if dense_cloud_extracted else out_rrd
+    if target_write_rrd.exists():
+        target_write_rrd.unlink()
+
+    rr.init("HospitalDigitalTwin", recording_id="semantic_map_clean")
+    rr.save(str(target_write_rrd))
 
     # Set right-hand Z-up coordinate system
     rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
 
-    # 1. Log Trajectory
+    # Log Trajectory
     poses = conn.execute("SELECT x, y, z FROM camera_poses ORDER BY frame_index").fetchall()
     if poses:
         traj_pts = np.array([[p["x"], p["y"], p["z"]] for p in poses], dtype=np.float32)
@@ -48,7 +89,7 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
             static=True,
         )
 
-    # 2. Log Navigable Floor Boundary
+    # Log Navigable Floor Boundary
     zones = conn.execute("SELECT * FROM navigable_zones WHERE zone_name = 'Floor'").fetchall()
     for z in zones:
         min_x, max_x = z["min_x"], z["max_x"]
@@ -67,7 +108,7 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
             static=True,
         )
 
-    # 3. Log Landmarks with real surface point clouds
+    # Log Landmarks with real surface point clouds
     landmarks = conn.execute("SELECT * FROM semantic_map").fetchall()
     lm_by_label: dict[str, tuple[float, float, float]] = {}
     all_pts_list = []
@@ -82,7 +123,6 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
         center = np.asarray([[lm["X"], lm["Y"], lm["Z"]]], dtype=np.float32)
         lm_by_label[label] = (float(lm["X"]), float(lm["Y"]), float(lm["Z"]))
 
-        # Special styling for novel/residual assets
         if class_name.startswith("novel_") or class_name == "unidentified_obstacle":
             color = [[245, 166, 35]]  # Amber
         else:
@@ -125,7 +165,7 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
             )
         count += 1
 
-    # Log unified high-visibility 3D point cloud
+    # Log unified object surface point cloud
     if all_pts_list:
         combined_pts = np.vstack(all_pts_list)
         combined_colors = np.vstack(all_colors_list)
@@ -135,7 +175,7 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
             static=True,
         )
 
-    # 4. Log 3D Compliance Hazard Lines (Red Proximity Strips)
+    # Log 3D Compliance Hazard Lines
     report_path = db_path.with_name("hospital_compliance_report.json")
     if report_path.exists():
         try:
@@ -153,7 +193,6 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
 
                 hazard_path = f"world/compliance_hazards/{rule}_{v_idx+1}"
                 if p1 and p2:
-                    # Draw connecting red hazard line between violating object and reference landmark (e.g. door)
                     strip = np.array([p1, p2], dtype=np.float32)
                     dist_text = f" ({d_val:.2f}m)" if d_val is not None else ""
                     rr.log(
@@ -162,7 +201,6 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
                         static=True,
                     )
                 elif p1:
-                    # Vertical red hazard alert post above single offending object
                     p_top = (p1[0], p1[1], p1[2] + 0.40)
                     strip = np.array([p1, p_top], dtype=np.float32)
                     rr.log(
@@ -173,7 +211,7 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
         except Exception as exc:
             print(f"Warning: could not log compliance hazards to RRD: {exc}")
 
-    # 5. Log 3D Door Keep-Clear Egress Zones (Andrea's 1.0m half-cylinder swing zones)
+    # Log 3D Semi-Cylindrical Keep-Clear Volumes (ONLY Emergency Fire Exits with Exit Signs on top)
     graph_path = db_path.with_name("spatial_scene_graph.json")
     if graph_path.exists():
         try:
@@ -182,17 +220,45 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
             door_zones = graph_data.get("door_keep_clear_zones", [])
             for dz in door_zones:
                 did = dz.get("door_id")
-                arc = dz.get("arc_samples_3d", [])
-                if arc and len(arc) >= 3:
-                    center_pt = (dz["center"][0], dz["center"][1], dz["z_bounds"][0])
-                    closed_arc = [center_pt] + [tuple(p) for p in arc] + [center_pt]
+                is_obstructed = dz.get("is_obstructed", False)
+                status_label = dz.get("status", "CLEAR")
+                # Dynamic green / red status
+                zone_color = [235, 50, 50] if is_obstructed else [46, 204, 113]
+
+                cage = dz.get("cage_samples_3d") or {}
+                bot_arc = cage.get("bottom_arc", [])
+                top_arc = cage.get("top_arc", [])
+                ribs = cage.get("vertical_ribs", [])
+                back_wall = cage.get("back_wall", [])
+
+                strips_list = []
+                # 1. Closed bottom arc at floor
+                if bot_arc and len(bot_arc) >= 3:
+                    center_bot = (dz["center"][0], dz["center"][1], dz["z_bounds"][0])
+                    strips_list.append(np.asarray([center_bot] + [tuple(p) for p in bot_arc] + [center_bot], dtype=np.float32))
+
+                # 2. Closed top arc at door header
+                if top_arc and len(top_arc) >= 3:
+                    center_top = (dz["center"][0], dz["center"][1], dz["z_bounds"][1])
+                    strips_list.append(np.asarray([center_top] + [tuple(p) for p in top_arc] + [center_top], dtype=np.float32))
+
+                # 3. Vertical corner and wall ribs connecting bottom to top
+                for rib in ribs:
+                    if len(rib) == 2:
+                        strips_list.append(np.asarray([tuple(rib[0]), tuple(rib[1])], dtype=np.float32))
+
+                # 4. Back-wall door opening rectangle
+                if back_wall and len(back_wall) >= 4:
+                    strips_list.append(np.asarray([tuple(p) for p in back_wall], dtype=np.float32))
+
+                if strips_list:
                     rr.log(
-                        f"world/door_zones/door_{did}_zone",
+                        f"world/door_zones/fire_exit_door_{did}_zone",
                         rr.LineStrips3D(
-                            [np.asarray(closed_arc, dtype=np.float32)],
-                            colors=[[220, 70, 70]],
-                            radii=0.018,
-                            labels=[f"Door {did} Keep-Clear Zone (r={dz.get('radius_m', 1.0)}m)"],
+                            strips_list,
+                            colors=[zone_color] * len(strips_list),
+                            radii=0.022,
+                            labels=[f"Fire Exit Door {did} 3D Zone [{status_label}] (r={dz.get('radius_m', 1.0)}m, h={dz.get('height_m', 2.0)}m)"],
                         ),
                         static=True,
                     )
@@ -200,7 +266,31 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
             print(f"Warning: could not log door keep-clear zones to RRD: {exc}")
 
     conn.close()
-    print(f"Exported {count} landmarks and trajectory to {out_rrd} (size: {out_rrd.stat().st_size / 1024:.1f} KB)")
+
+    # Flush Rerun writer
+    rr.disconnect()
+
+    # 3. Merge dense environment point cloud and semantic landmarks into canonical out_rrd
+    if dense_cloud_extracted and temp_cloud_rrd.exists() and temp_semantic_rrd.exists():
+        try:
+            cmd_merge = [
+                str(rerun_bin), "rrd", "merge",
+                "-o", str(out_rrd),
+                str(temp_cloud_rrd),
+                str(temp_semantic_rrd)
+            ]
+            subprocess.run(cmd_merge, capture_output=True, text=True, timeout=30)
+            if temp_cloud_rrd.exists():
+                temp_cloud_rrd.unlink()
+            if temp_semantic_rrd.exists():
+                temp_semantic_rrd.unlink()
+        except Exception as exc:
+            print(f"Warning: could not merge environment cloud: {exc}")
+            if temp_semantic_rrd.exists():
+                shutil.move(str(temp_semantic_rrd), str(out_rrd))
+
+    file_size_mb = out_rrd.stat().st_size / (1024 * 1024) if out_rrd.exists() else 0.0
+    print(f"Exported {count} landmarks, full point cloud, and trajectory to {out_rrd} (size: {file_size_mb:.2f} MB)")
     return out_rrd
 
 
@@ -212,4 +302,3 @@ if __name__ == "__main__":
 
     out_file = args.out or args.db.with_name("world_map.rrd")
     export_clean_rrd(args.db, out_file)
-

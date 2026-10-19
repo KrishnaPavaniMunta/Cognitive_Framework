@@ -133,19 +133,24 @@ class HospitalComplianceEvaluator:
         try:
             persisted_edges = self.scene_graph.persist_to_sqlite(self.db_path)
             json_graph_path = self.db_path.with_name("spatial_scene_graph.json")
-            self.scene_graph.export_json(json_graph_path)
+            graph_json_dict = self.scene_graph.export_json(json_graph_path)
+            door_zones_data = graph_json_dict.get("door_keep_clear_zones", [])
         except Exception as exc:
             persisted_edges = 0
+            door_zones_data = []
 
         report = {
             "database": str(self.db_path),
             "total_landmarks_analyzed": len(self.landmarks),
             "total_spatial_edges_evaluated": len(self.edges),
             "spatial_edges_persisted_to_db": persisted_edges,
+            "total_rules_evaluated": len(checks),
             "overall_compliant": overall_compliant,
             "total_violations": violations_count,
             "violations": flat_violations,
             "rules": checks,
+            "spatial_edges": [e.to_dict() for e in self.edges],
+            "door_keep_clear_zones": door_zones_data,
         }
         return report
 
@@ -153,15 +158,18 @@ class HospitalComplianceEvaluator:
         """
         Rule 1: Are all emergency fire doors and escape exits kept clear and unobstructed?
         Evaluates 3D keep-clear half-cylinder zones (radius 1.0m) and 0.85m minimum passage width
-        operationalized from Obstruction_detection.py and Andrea's fire safety rules.
+        ONLY for designated Emergency Fire Exit doors that have an exit sign on top.
         """
-        doors = [lm for lm in self.landmarks if "door" in str(lm["class_name"]).lower()]
+        fire_doors = [
+            lm for lm in self.landmarks
+            if int(lm["landmark_id"]) in self.scene_graph.door_zones
+        ]
         violations = []
         passed = []
 
-        for door in doors:
+        for door in fire_doors:
             did = int(door["landmark_id"])
-            dzone = self.scene_graph.door_zones.get(did)
+            dzone = self.scene_graph.door_zones[did]
             door_box = self.scene_graph.nodes[did].bbox
             obstructing = []
 
@@ -176,52 +184,46 @@ class HospitalComplianceEvaluator:
                 box = node_obs.bbox
 
                 # Use 3D keep-clear half-cylinder egress zone check
-                if dzone is not None:
-                    intersects, intrusion_m, deficit_m = dzone.intersects_box(box)
+                intersects, intrusion_m, deficit_m = dzone.intersects_box(box)
 
-                    # Also test surface points if present
-                    surf_raw = lm.get("surface_points_json")
-                    pts_penetrating = 0
-                    if surf_raw:
-                        try:
-                            pts = np.asarray(json.loads(surf_raw), dtype=np.float32)
-                            pts_int, pts_penetrating, _ = dzone.intersects_points(pts)
-                            intersects = intersects or pts_int
-                        except Exception:
-                            pass
+                # Also test surface points if present
+                surf_raw = lm.get("surface_points_json")
+                pts_penetrating = 0
+                if surf_raw:
+                    try:
+                        pts = np.asarray(json.loads(surf_raw), dtype=np.float32)
+                        pts_int, pts_penetrating, _ = dzone.intersects_points(pts)
+                        intersects = intersects or pts_int
+                    except Exception:
+                        pass
 
-                    if intersects:
-                        obstructing.append({
-                            "obstacle_id": oid,
-                            "obstacle_class": lm["class_name"],
-                            "obstacle_instance": lm.get("instance_id"),
-                            "distance_m": round(box.distance_to(door_box), 2),
-                            "intrusion_depth_m": round(intrusion_m, 2),
-                            "clear_width_deficit_m": round(deficit_m, 2),
-                            "surface_points_penetrating": pts_penetrating,
-                            "coordinates": (round(float(lm["X"]), 2), round(float(lm["Y"]), 2), round(float(lm["Z"]), 2)),
-                        })
-                else:
-                    # Fallback check
-                    lat_dist = box.lateral_distance_to(door_box)
-                    if lat_dist < 1.0 and is_blocking(box, door_box, threshold_m=1.0):
-                        obstructing.append({
-                            "obstacle_id": oid,
-                            "obstacle_class": lm["class_name"],
-                            "obstacle_instance": lm.get("instance_id"),
-                            "distance_m": round(lat_dist, 2),
-                            "coordinates": (round(float(lm["X"]), 2), round(float(lm["Y"]), 2), round(float(lm["Z"]), 2)),
-                        })
+                if intersects:
+                    obstructing.append({
+                        "obstacle_id": oid,
+                        "obstacle_class": lm["class_name"],
+                        "obstacle_instance": lm.get("instance_id"),
+                        "distance_m": round(box.distance_to(door_box), 2),
+                        "intrusion_depth_m": round(intrusion_m, 2),
+                        "clear_width_deficit_m": round(deficit_m, 2),
+                        "surface_points_penetrating": pts_penetrating,
+                        "coordinates": (round(float(lm["X"]), 2), round(float(lm["Y"]), 2), round(float(lm["Z"]), 2)),
+                    })
 
             if obstructing:
+                dzone.is_obstructed = True
+                dzone.status = "OBSTRUCTED"
+                dzone.color_hex = "#e74c3c"
                 violations.append({
                     "door_id": did,
                     "door_instance": door.get("instance_id"),
                     "coordinates": (round(float(door["X"]), 2), round(float(door["Y"]), 2), round(float(door["Z"]), 2)),
                     "obstructing_items": obstructing,
-                    "reason": f"Fire door egress is obstructed by {len(obstructing)} movable item(s) within the 1.0m keep-clear swing zone.",
+                    "reason": f"Emergency fire door egress is obstructed by {len(obstructing)} movable item(s) within the 1.0m keep-clear swing zone.",
                 })
             else:
+                dzone.is_obstructed = False
+                dzone.status = "CLEAR"
+                dzone.color_hex = "#2ecc71"
                 passed.append({
                     "door_id": did,
                     "door_instance": door.get("instance_id"),
@@ -232,7 +234,7 @@ class HospitalComplianceEvaluator:
             "rule_id": "HS-01-DOOR-CLEARANCE",
             "rule_title": "Fire Exit Doorway & Evacuation Route Clearance (1.0m Egress Zone)",
             "compliant": len(violations) == 0,
-            "items_checked": len(doors),
+            "items_checked": len(fire_doors),
             "violations": violations,
             "compliant_items": passed,
         }

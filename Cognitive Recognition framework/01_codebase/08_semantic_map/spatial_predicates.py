@@ -173,6 +173,11 @@ class DoorKeepClearZone3D:
     z_min: float = 0.00                      # floor elevation at door threshold
     z_max: float = 2.05                      # top of door header clearance
     required_clear_width: float = 0.85       # minimum legally required passage width (m)
+    is_fire_exit: bool = True                # Only doors with an exit sign on top are emergency fire exits
+    is_obstructed: bool = False              # True if any obstacle penetrates the keep-clear volume
+    status: str = "CLEAR"                    # "CLEAR" (green) or "OBSTRUCTED" (red)
+    color_hex: str = "#2ecc71"               # Default green
+    obstructing_items: list[dict] = field(default_factory=list)
 
     def contains_point(self, x: float, y: float, z: float, tolerance_m: float = 0.05) -> bool:
         """
@@ -180,7 +185,7 @@ class DoorKeepClearZone3D:
         Directly mirrors _point_inside_half_cylinder from Obstruction_detection.py,
         adapted to the world reference frame (Z up, XY planar).
         """
-        # 1. Vertical extrusion check
+        # 1. Vertical extrusion check across the entire door height
         if z < (self.z_min - tolerance_m) or z > (self.z_max + tolerance_m):
             return False
 
@@ -199,10 +204,11 @@ class DoorKeepClearZone3D:
     def intersects_box(self, box: BoundingBox3D, tolerance_m: float = 0.08) -> tuple[bool, float, float]:
         """
         Check if an obstacle bounding box penetrates the door keep-clear half-cylinder.
+        Evaluates full vertical extrusion from floor to door header (hanging or floor obstacles).
         Returns:
             (intersects, penetration_distance_m, clear_width_deficit_m)
         """
-        # Vertical overlap check
+        # Vertical overlap check across door height
         if box.z_max < (self.z_min - tolerance_m) or box.z_min > (self.z_max + tolerance_m):
             return False, 0.0, 0.0
 
@@ -266,17 +272,54 @@ class DoorKeepClearZone3D:
         """Sample the semi-circular floor arc in 3D for digital twin visualization."""
         xd, yd, _ = self.center
         nx, ny = self.egress_normal
-        # Angle of the forward normal
         base_angle = math.atan2(ny, nx)
 
         arc_pts: list[tuple[float, float, float]] = []
         for i in range(num_samples + 1):
-            # Sweep from -pi/2 to +pi/2 relative to the normal
             angle = base_angle - (math.pi / 2.0) + (math.pi * i / num_samples)
             px = xd + self.radius * math.cos(angle)
             py = yd + self.radius * math.sin(angle)
             arc_pts.append((round(px, 3), round(py, 3), round(self.z_min, 3)))
         return arc_pts
+
+    def sample_cylinder_cage_3d(self, num_samples: int = 20) -> dict[str, Any]:
+        """
+        Samples the full extruded 3D semi-cylindrical volume (bottom arc, top arc,
+        vertical corner posts, and ribs) matching door_zone_rgbd.py / Obstruction_detection.py.
+        """
+        xd, yd, _ = self.center
+        nx, ny = self.egress_normal
+        base_angle = math.atan2(ny, nx)
+
+        bottom_arc: list[tuple[float, float, float]] = []
+        top_arc: list[tuple[float, float, float]] = []
+
+        for i in range(num_samples + 1):
+            angle = base_angle - (math.pi / 2.0) + (math.pi * i / num_samples)
+            px = xd + self.radius * math.cos(angle)
+            py = yd + self.radius * math.sin(angle)
+            bottom_arc.append((round(px, 3), round(py, 3), round(self.z_min, 3)))
+            top_arc.append((round(px, 3), round(py, 3), round(self.z_max, 3)))
+
+        # Ribs connecting bottom to top along curved wall
+        vertical_ribs = []
+        step = max(1, num_samples // 4)
+        for i in range(0, num_samples + 1, step):
+            vertical_ribs.append([bottom_arc[i], top_arc[i]])
+
+        # Flat back-wall rectangle at door opening
+        back_wall = [
+            bottom_arc[0], bottom_arc[-1],
+            top_arc[-1], top_arc[0],
+            bottom_arc[0],
+        ]
+
+        return {
+            "bottom_arc": bottom_arc,
+            "top_arc": top_arc,
+            "vertical_ribs": vertical_ribs,
+            "back_wall": back_wall,
+        }
 
 
 # ── Directional Halfspace Predicates (Section III-B in Ibba et al.) ────────────
@@ -605,6 +648,12 @@ class SpatialSceneGraph:
                 pts_arr = np.asarray(all_pts, dtype=np.float32)
                 corridor_center = (float(np.mean(pts_arr[:, 0])), float(np.mean(pts_arr[:, 1])))
 
+        # 1. Identify all exit sign landmarks
+        exit_sign_nodes = [
+            n for n in self.nodes.values()
+            if "exit_sign" in n.class_name.lower() or "fire_exit" in n.class_name.lower()
+        ]
+
         for node in self.nodes.values():
             if "door" not in node.class_name.lower():
                 continue
@@ -613,6 +662,33 @@ class SpatialSceneGraph:
             rw = node.extents[1]  # measured width
             rh = node.extents[2]  # measured height
 
+            # Check if this door has an exit sign above or on top of it (Emergency Fire Exit)
+            is_fire_exit = False
+            matched_sign_id = None
+            for sign in exit_sign_nodes:
+                dx = sign.centroid[0] - cx
+                dy = sign.centroid[1] - cy
+                lat_dist = math.hypot(dx, dy)
+                vert_dz = sign.centroid[2] - cz
+                # Exit sign must be within lateral reach of the door opening and at/above door height
+                if lat_dist <= max(2.0, rw + 1.0) and vert_dz >= -0.25:
+                    is_fire_exit = True
+                    matched_sign_id = sign.node_id
+                    break
+
+            # Check if landmark votes explicitly classified this door as an exit
+            if not is_fire_exit:
+                for lm_raw in self.raw_landmarks:
+                    if int(lm_raw.get("landmark_id", -1)) == node.node_id:
+                        votes = lm_raw.get("class_votes_json") or ""
+                        if "exit" in votes.lower():
+                            is_fire_exit = True
+                            break
+
+            # ONLY activate keep-clear egress zone for Emergency Fire Exit doors!
+            if not is_fire_exit:
+                continue
+
             # Determine egress normal facing into the corridor
             if corridor_center is not None:
                 dx = corridor_center[0] - cx
@@ -620,7 +696,6 @@ class SpatialSceneGraph:
                 dist = math.hypot(dx, dy)
                 normal = (dx / dist, dy / dist) if dist > 1e-4 else (0.0, 1.0)
             elif self.camera_poses:
-                # Find nearest camera pose to the door
                 poses_arr = np.asarray([(p[0], p[1]) for p in self.camera_poses], dtype=np.float32)
                 diff = poses_arr - np.array([cx, cy], dtype=np.float32)
                 dists = np.hypot(diff[:, 0], diff[:, 1])
@@ -646,6 +721,9 @@ class SpatialSceneGraph:
                 z_min=z_bottom,
                 z_max=z_top,
                 required_clear_width=0.85,
+                is_fire_exit=True,
+                status="CLEAR",
+                color_hex="#2ecc71",
             )
 
     def compute_spatial_edges(self, max_pair_dist_m: float = 2.5) -> list[SceneEdge]:
@@ -742,38 +820,58 @@ class SpatialSceneGraph:
                         evidence=f"{node_b.class_name} 3D bbox fully contained within {node_a.class_name}",
                     ))
 
-                # ── 2. Functional Safety & Doorway Obstruction ────────────────
-                # Check A blocking door B
+                # ── 2. Functional Safety & Emergency Exit Obstruction ────────
+                # Check A blocking emergency fire door B
                 if "door" in cls_b and node_a.is_movable:
                     dzone = self.door_zones.get(id_b)
-                    blocked, pen_m, def_m = dzone.intersects_box(box_a) if dzone else (is_blocking(box_a, box_b), 0.0, 0.0)
-                    if blocked:
-                        metrics = dict(base_metrics)
-                        metrics["intrusion_depth_m"] = pen_m
-                        metrics["clear_width_deficit_m"] = def_m
-                        self.edges.append(SceneEdge(
-                            source_id=id_a, source_class=node_a.class_name,
-                            target_id=id_b, target_class=node_b.class_name,
-                            predicate="is_blocking", category="functional_safety",
-                            metrics=metrics, is_violation=True,
-                            evidence=f"Obstacle intrudes {pen_m:.2f}m into 1.0m door swing arc (width deficit: {def_m:.2f}m)",
-                        ))
+                    if dzone is not None:
+                        blocked, pen_m, def_m = dzone.intersects_box(box_a)
+                        if blocked:
+                            dzone.is_obstructed = True
+                            dzone.status = "OBSTRUCTED"
+                            dzone.color_hex = "#e74c3c"
+                            dzone.obstructing_items.append({
+                                "obstacle_id": id_a,
+                                "obstacle_class": node_a.class_name,
+                                "intrusion_depth_m": pen_m,
+                                "deficit_m": def_m,
+                            })
+                            metrics = dict(base_metrics)
+                            metrics["intrusion_depth_m"] = pen_m
+                            metrics["clear_width_deficit_m"] = def_m
+                            self.edges.append(SceneEdge(
+                                source_id=id_a, source_class=node_a.class_name,
+                                target_id=id_b, target_class=node_b.class_name,
+                                predicate="is_blocking", category="functional_safety",
+                                metrics=metrics, is_violation=True,
+                                evidence=f"Obstacle intrudes {pen_m:.2f}m into 1.0m emergency fire exit keep-clear zone (width deficit: {def_m:.2f}m)",
+                            ))
 
-                # Check B blocking door A
+                # Check B blocking emergency fire door A
                 if "door" in cls_a and node_b.is_movable:
                     dzone = self.door_zones.get(id_a)
-                    blocked, pen_m, def_m = dzone.intersects_box(box_b) if dzone else (is_blocking(box_b, box_a), 0.0, 0.0)
-                    if blocked:
-                        metrics = dict(base_metrics)
-                        metrics["intrusion_depth_m"] = pen_m
-                        metrics["clear_width_deficit_m"] = def_m
-                        self.edges.append(SceneEdge(
-                            source_id=id_b, source_class=node_b.class_name,
-                            target_id=id_a, target_class=node_a.class_name,
-                            predicate="is_blocking", category="functional_safety",
-                            metrics=metrics, is_violation=True,
-                            evidence=f"Obstacle intrudes {pen_m:.2f}m into 1.0m door swing arc (width deficit: {def_m:.2f}m)",
-                        ))
+                    if dzone is not None:
+                        blocked, pen_m, def_m = dzone.intersects_box(box_b)
+                        if blocked:
+                            dzone.is_obstructed = True
+                            dzone.status = "OBSTRUCTED"
+                            dzone.color_hex = "#e74c3c"
+                            dzone.obstructing_items.append({
+                                "obstacle_id": id_b,
+                                "obstacle_class": node_b.class_name,
+                                "intrusion_depth_m": pen_m,
+                                "deficit_m": def_m,
+                            })
+                            metrics = dict(base_metrics)
+                            metrics["intrusion_depth_m"] = pen_m
+                            metrics["clear_width_deficit_m"] = def_m
+                            self.edges.append(SceneEdge(
+                                source_id=id_b, source_class=node_b.class_name,
+                                target_id=id_a, target_class=node_a.class_name,
+                                predicate="is_blocking", category="functional_safety",
+                                metrics=metrics, is_violation=True,
+                                evidence=f"Obstacle intrudes {pen_m:.2f}m into 1.0m emergency fire exit keep-clear zone (width deficit: {def_m:.2f}m)",
+                            ))
 
                 # ── 3. Combustible Near Ignition Hazard ───────────────────────
                 if (node_a.is_combustible and node_b.is_ignition_source) or (node_b.is_combustible and node_a.is_ignition_source):
@@ -859,7 +957,12 @@ class SpatialSceneGraph:
                     "egress_normal": [round(n, 3) for n in dz.egress_normal],
                     "z_bounds": [round(dz.z_min, 3), round(dz.z_max, 3)],
                     "required_clear_width_m": dz.required_clear_width,
-                    "arc_samples_3d": dz.sample_arc_3d(num_samples=16),
+                    "is_fire_exit": dz.is_fire_exit,
+                    "is_obstructed": dz.is_obstructed,
+                    "status": dz.status,
+                    "color_hex": dz.color_hex,
+                    "arc_samples_3d": dz.sample_arc_3d(num_samples=20),
+                    "cage_samples_3d": dz.sample_cylinder_cage_3d(num_samples=20),
                 }
                 for dz in self.door_zones.values()
             ],
