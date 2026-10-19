@@ -921,6 +921,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-video", action="store_true", help="Do not record preview.mp4")
     p.add_argument("--rerun", action="store_true",
                    help="Export a new full world_map.rrd snapshot")
+    p.add_argument("--rerun-only", action="store_true",
+                   help="Geometry and cloud replay only, preserving persistent landmarks from world_map.db without re-running detector inference")
     p.add_argument("--no-rerun", action="store_false", dest="rerun",
                    help="Skip Rerun generation for this run")
     p.add_argument("--rerun-spawn", action="store_true", help="Open the Rerun viewer live while processing")
@@ -1151,6 +1153,7 @@ def main() -> None:
             LOG.info("[DISCOVERY] Two-Tier Residual Cognition active (interval: %d frames)", args.residual_interval)
         except Exception as exc:
             LOG.warning("[DISCOVERY] Could not initialize residual cognition: %s", exc)
+    depth_ts = [m.timestamp_ns for m in depth_messages]
     cam_ts = [m.timestamp_ns for m in caminfo_messages]
 
     db_path = run_dir / "world_map.db"
@@ -1566,10 +1569,7 @@ def main() -> None:
             }
             for landmark in consensus_landmarks.values():
                 landmark["ontology"] = knowledge_by_class[landmark["class_name"]]
-            scene.log_landmarks(consensus_landmarks, size_lookup=build_size_lookup())
-            scene.finish()
-            LOG.info("[RERUN] Scene written: %d cloud chunks, %d points, %d trajectory poses, %d consensus landmarks",
-                     scene.cloud_chunks, scene.points_logged, len(scene.trajectory), len(consensus_landmarks))
+
         if writer is not None:
             writer.release()
             if video_path.exists() and shutil.which("ffmpeg"):
@@ -1595,6 +1595,7 @@ def main() -> None:
     # 1. Hospital Health & Safety Compliance Audit (KMi Spatial Reasoner + Andrea's Egress Zones)
     comp_md_path = db_path.with_name("hospital_compliance_report.md")
     comp_json_path = db_path.with_name("hospital_compliance_report.json")
+    comp_report = None
     try:
         compliance_eval = HospitalComplianceEvaluator(db_path)
         comp_report = compliance_eval.evaluate_all()
@@ -1608,13 +1609,23 @@ def main() -> None:
     except Exception as exc:
         LOG.warning("Failed to evaluate hospital compliance: %s", exc)
 
-    # 2. Export canonical lightweight RRD (< 3 MB) for instant sub-second visualization
     canonical_rrd_path = db_path.with_name("world_map.rrd")
-    try:
-        export_clean_rrd(db_path, canonical_rrd_path)
-        LOG.info("[RERUN] Canonical 3D digital twin written: %s", canonical_rrd_path)
-    except Exception as exc:
-        LOG.warning("Failed to export canonical RRD: %s", exc)
+
+    # 2. Finalize Rerun scene logging with 3D boxes, door zones, and compliance hazards
+    if scene is not None:
+        scene.log_landmarks(consensus_landmarks, size_lookup=build_size_lookup())
+        if comp_report is not None:
+            scene.log_compliance(comp_report)
+        scene.finish()
+        LOG.info("[RERUN] Scene written: %d cloud chunks, %d points, %d trajectory poses, %d consensus landmarks",
+                 scene.cloud_chunks, scene.points_logged, len(scene.trajectory), len(consensus_landmarks))
+    else:
+        # If Rerun logging was not active during the run, export canonical digital twin from DB
+        try:
+            export_clean_rrd(db_path, canonical_rrd_path)
+            LOG.info("[RERUN] Canonical 3D digital twin written: %s", canonical_rrd_path)
+        except Exception as exc:
+            LOG.warning("Failed to export canonical RRD: %s", exc)
 
     # 3. Export canonical interactive HTML 3D Digital Twin
     html_path = refresh_semantic_map_html(db_path, Path(args.ontology).resolve())

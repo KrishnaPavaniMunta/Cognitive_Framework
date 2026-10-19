@@ -291,6 +291,8 @@ def log_landmark_entities(landmarks, size_lookup=None) -> None:
         color = [class_color(landmark["class_name"])]
         path = stable_landmark_path(landmark, landmark_id)
 
+        half_size = resolve_box_half_size(landmark, size_lookup=size_lookup)
+
         # 3D Physical Surface Point Cloud: strictly physical contour from neural masks and depth
         pts = landmark.get("surface_points")
         if pts is not None and len(pts) >= 5:
@@ -307,8 +309,6 @@ def log_landmark_entities(landmarks, size_lookup=None) -> None:
                 static=True,
             )
         else:
-            # If dense surface points were not captured, log only the physical center location with the label.
-            # Never synthesize artificial cuboid/rectangular bounding boxes.
             rr.log(
                 path,
                 rr.Points3D(
@@ -318,6 +318,19 @@ def log_landmark_entities(landmarks, size_lookup=None) -> None:
                     radii=0.045,
                 ),
                 rr.AnyValues(**landmark_metadata(landmark, landmark_id)),
+                static=True,
+            )
+
+        # 3D Bounding Box under child entity (exactly as shown in second screenshot)
+        if not is_floor:
+            rr.log(
+                f"{path}/bounds",
+                rr.Boxes3D(
+                    centers=center,
+                    half_sizes=np.asarray(half_size, dtype=np.float32),
+                    colors=color,
+                    fill_mode="MajorWireframe",
+                ),
                 static=True,
             )
 
@@ -635,6 +648,70 @@ class RerunSceneLogger:
         if not landmarks:
             return
         log_landmark_entities(landmarks, size_lookup=size_lookup)
+
+    def log_compliance(self, compliance_report: dict | None) -> None:
+        """Log 3D Fire Exit Door Keep-Clear volumes and compliance hazard lines directly into Rerun."""
+        if not compliance_report:
+            return
+
+        # 1. Log 3D Compliance Hazard Lines
+        violations = compliance_report.get("violations", [])
+        for v_idx, v in enumerate(violations):
+            rule = v.get("rule_id", "HAZARD")
+            coords = v.get("coordinates")
+            hazard_path = f"world/compliance_hazards/{rule}_{v_idx+1}"
+            if coords:
+                p1 = np.array(coords, dtype=np.float32)
+                p_top = p1 + np.array([0, 0, 0.40], dtype=np.float32)
+                rr.log(
+                    hazard_path,
+                    rr.LineStrips3D([[p1, p_top]], colors=[[240, 45, 45]], radii=0.03, labels=[f"VIOLATION: {rule}"]),
+                    static=True,
+                )
+
+        # 2. Log 3D Extruded Semi-Cylinders for Emergency Fire Exit Doors
+        door_zones = compliance_report.get("door_keep_clear_zones", [])
+        for dz in door_zones:
+            if not dz.get("is_fire_exit", True):
+                continue
+            did = dz.get("door_id")
+            is_obstructed = dz.get("is_obstructed", False)
+            status_label = dz.get("status", "CLEAR")
+            zone_color = [235, 50, 50] if is_obstructed else [46, 204, 113]
+
+            cage = dz.get("cage_samples_3d") or {}
+            bot_arc = cage.get("bottom_arc", []) if isinstance(cage, dict) else []
+            top_arc = cage.get("top_arc", []) if isinstance(cage, dict) else []
+            ribs = cage.get("vertical_ribs", []) if isinstance(cage, dict) else []
+            back_wall = cage.get("back_wall", []) if isinstance(cage, dict) else []
+
+            strips_list = []
+            if bot_arc and len(bot_arc) >= 3:
+                center_bot = (dz["center"][0], dz["center"][1], dz["z_bounds"][0])
+                strips_list.append(np.asarray([center_bot] + [tuple(p) for p in bot_arc] + [center_bot], dtype=np.float32))
+
+            if top_arc and len(top_arc) >= 3:
+                center_top = (dz["center"][0], dz["center"][1], dz["z_bounds"][1])
+                strips_list.append(np.asarray([center_top] + [tuple(p) for p in top_arc] + [center_top], dtype=np.float32))
+
+            for rib in ribs:
+                if len(rib) == 2:
+                    strips_list.append(np.asarray([tuple(rib[0]), tuple(rib[1])], dtype=np.float32))
+
+            if back_wall and len(back_wall) >= 4:
+                strips_list.append(np.asarray([tuple(p) for p in back_wall], dtype=np.float32))
+
+            if strips_list:
+                rr.log(
+                    f"world/door_zones/fire_exit_door_{did}_zone",
+                    rr.LineStrips3D(
+                        strips_list,
+                        colors=[zone_color] * len(strips_list),
+                        radii=0.022,
+                        labels=[f"Fire Exit Door {did} 3D Zone [{status_label}] (r={dz.get('radius_m', 1.0)}m, h={dz.get('height_m', 2.0)}m)"],
+                    ),
+                    static=True,
+                )
 
     def finish(self) -> None:
         self.log_navigable_zone()

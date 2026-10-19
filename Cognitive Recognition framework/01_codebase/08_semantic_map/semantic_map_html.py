@@ -525,8 +525,9 @@ function switchTab(tab) {
   const isCompliant = compliance.overall_compliant;
   const statusBadge = isCompliant ? "<span class='badge badge-success'>ALL AUDIT RULES PASSED</span>" : "<span class='badge badge-danger'>NON-COMPLIANT VIOLATIONS DETECTED</span>";
   const violCount = compliance.total_violations || 0;
-  const rulesCount = compliance.total_rules_evaluated || (compliance.rules ? compliance.rules.length : 6);
-  const passedCount = Math.max(0, rulesCount - violCount);
+  const rulesList = compliance.rules || [];
+  const rulesCount = rulesList.length || compliance.total_rules_evaluated || 5;
+  const passedCount = rulesList.filter(r => r.compliant !== false).length;
 
   let html = `
     <div class="stat-grid">
@@ -541,7 +542,7 @@ function switchTab(tab) {
     </div>
     <div class="stat-grid">
       <div class="stat-box">
-        <div class="stat-val ok">${passedCount} / ${rulesCount}</div>
+        <div class="stat-val ${passedCount === rulesCount ? 'ok' : 'viol'}">${passedCount} / ${rulesCount}</div>
         <div class="stat-lbl">Rules Satisfied</div>
       </div>
       <div class="stat-box">
@@ -552,16 +553,21 @@ function switchTab(tab) {
   `;
 
   // Render Rules status list
-  if (compliance.rules && compliance.rules.length > 0) {
+  if (rulesList.length > 0) {
     html += "<section><h2>Regulatory Rules Evaluated (QSR Deterministic)</h2>";
-    compliance.rules.forEach(r => {
-      const isPassed = r.status === "PASS";
+    rulesList.forEach(r => {
+      const isPassed = r.compliant !== false && (r.status === "PASS" || r.compliant === true);
       const badge = isPassed ? "<span class='badge badge-success'>PASS</span>" : "<span class='badge badge-danger'>FAIL</span>";
+      const title = r.rule_title || r.title || r.name || "";
+      const checkedInfo = r.items_checked != null ? `Items Checked: ${r.items_checked}` : "";
+      const violInfo = (!isPassed && r.violations && r.violations.length > 0) ? `<span style='color:var(--danger); font-weight:600;'>(${r.violations.length} Infraction${r.violations.length > 1 ? 's' : ''})</span>` : "";
+
       html += `
         <div class="card" style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
           <div>
-            <div style="font-weight:700; font-size:12px;">${r.rule_id}: ${r.title || r.name || ""}</div>
-            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Threshold: ${r.threshold_m || "N/A"}m | Clause: ${r.clause || "Health & Safety"}</div>
+            <div style="font-weight:700; font-size:12px;">${r.rule_id}</div>
+            <div style="font-size:11px; color:var(--text); margin-top:2px;">${title}</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${checkedInfo} ${violInfo}</div>
           </div>
           <div>${badge}</div>
         </div>
