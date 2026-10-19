@@ -52,6 +52,7 @@ def load_landmarks(conn: sqlite3.Connection, min_hits: int, classes: set[str] | 
     optional = [
         "instance_id", "max_confidence", "first_seen_ns", "last_seen_ns", "first_seen", "last_seen",
         "measured_width", "measured_depth", "measured_height", "class_votes_json", "consensus_score",
+        "surface_points_json",
     ]
     selected = required + [column for column in optional if column in available]
     rows = conn.execute(
@@ -82,6 +83,14 @@ def load_landmarks(conn: sqlite3.Connection, min_hits: int, classes: set[str] | 
         else:
             landmark["class_votes"] = None
         landmark.setdefault("consensus_score", 1.0)
+        pts_raw = landmark.get("surface_points_json")
+        if pts_raw:
+            try:
+                landmark["surface_points"] = json.loads(pts_raw)
+            except Exception:
+                landmark["surface_points"] = None
+        else:
+            landmark["surface_points"] = None
 
     # Fallback to observations table if measured_width not in semantic_map or is None
     obs_cols = {row[1] for row in conn.execute("PRAGMA table_info(observations)")}

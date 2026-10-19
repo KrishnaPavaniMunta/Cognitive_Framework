@@ -33,6 +33,9 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
     rr.init("SemanticMapClean", recording_id="semantic_map_clean")
     rr.save(str(out_rrd))
 
+    # Set right-hand Z-up coordinate system
+    rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
+
     # 1. Log Trajectory
     poses = conn.execute("SELECT x, y, z FROM camera_poses ORDER BY frame_index").fetchall()
     if poses:
@@ -67,6 +70,8 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
     # 3. Log Landmarks with real surface point clouds
     landmarks = conn.execute("SELECT * FROM semantic_map").fetchall()
     lm_by_label: dict[str, tuple[float, float, float]] = {}
+    all_pts_list = []
+    all_colors_list = []
     count = 0
     for row in landmarks:
         lm = dict(row)
@@ -94,13 +99,14 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
                 pts = None
 
         if pts is not None and len(pts) >= 5:
+            all_pts_list.append(pts)
+            all_colors_list.append(np.tile(color[0], (len(pts), 1)))
             rr.log(
                 path,
                 rr.Points3D(
                     pts,
                     colors=[color[0]] * len(pts),
-                    labels=[label],
-                    radii=0.028,
+                    radii=0.035,
                 ),
                 rr.AnyValues(**landmark_metadata(lm, landmark_id)),
                 static=True,
@@ -112,12 +118,22 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
                     center,
                     colors=color,
                     labels=[label],
-                    radii=0.045,
+                    radii=0.055,
                 ),
                 rr.AnyValues(**landmark_metadata(lm, landmark_id)),
                 static=True,
             )
         count += 1
+
+    # Log unified high-visibility 3D point cloud
+    if all_pts_list:
+        combined_pts = np.vstack(all_pts_list)
+        combined_colors = np.vstack(all_colors_list)
+        rr.log(
+            "world/pointcloud",
+            rr.Points3D(combined_pts, colors=combined_colors, radii=0.038),
+            static=True,
+        )
 
     # 4. Log 3D Compliance Hazard Lines (Red Proximity Strips)
     report_path = db_path.with_name("hospital_compliance_report.json")

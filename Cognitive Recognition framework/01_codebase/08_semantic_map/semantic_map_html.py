@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import plotly.graph_objects as go
 from plotly.offline import get_plotlyjs
 
@@ -200,6 +201,34 @@ def build_figure(
                     for payload, landmark in zip(payloads, members)
                 ],
                 hovertemplate=hover_template,
+            )
+        )
+
+    # 5. Render 3D Surface Point Clouds for segmented landmarks
+    cloud_x, cloud_y, cloud_z, cloud_colors = [], [], [], []
+    for lm in landmarks:
+        pts = lm.get("surface_points")
+        if pts is not None and len(pts) >= 5:
+            arr = np.asarray(pts, dtype=np.float32)
+            if len(arr) > 100:
+                idx = np.linspace(0, len(arr) - 1, 100, dtype=int)
+                arr = arr[idx]
+            cloud_x.extend(arr[:, 0].tolist())
+            cloud_y.extend(arr[:, 1].tolist())
+            cloud_z.extend(arr[:, 2].tolist())
+            c = colors.get(lm["class_name"], "#4fb3a5")
+            cloud_colors.extend([c] * len(arr))
+
+    if cloud_x:
+        figure.add_trace(
+            go.Scatter3d(
+                x=cloud_x,
+                y=cloud_y,
+                z=cloud_z,
+                mode="markers",
+                name="3D Surface Clouds",
+                marker={"size": 2.2, "color": cloud_colors, "opacity": 0.60},
+                hoverinfo="skip",
             )
         )
 
