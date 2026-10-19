@@ -151,6 +151,37 @@ def build_figure(
                 )
             )
 
+    # 3b. Render 3D Door Keep-Clear Egress Zones (Andrea's half-cylinder swing zones)
+    if compliance_report:
+        db_p_str = compliance_report.get("database", "")
+        if db_p_str:
+            graph_json_p = Path(db_p_str).with_name("spatial_scene_graph.json")
+            if graph_json_p.exists():
+                try:
+                    with open(graph_json_p, "r", encoding="utf-8") as f:
+                        sg_data = json.load(f)
+                    for dz in sg_data.get("door_keep_clear_zones", []):
+                        did = dz.get("door_id")
+                        arc = dz.get("arc_samples_3d", [])
+                        if arc and len(arc) >= 3:
+                            cz = dz.get("z_bounds", [0.0, 2.0])[0]
+                            center_pt = [dz["center"][0], dz["center"][1], cz]
+                            closed_arc = [center_pt] + [list(p[:2]) + [cz] for p in arc] + [center_pt]
+                            figure.add_trace(
+                                go.Scatter3d(
+                                    x=[p[0] for p in closed_arc],
+                                    y=[p[1] for p in closed_arc],
+                                    z=[p[2] for p in closed_arc],
+                                    mode="lines",
+                                    name=f"Door {did} Zone (1.0m)",
+                                    line={"color": "#e63946", "width": 3, "dash": "dash"},
+                                    hovertemplate=f"<b>Fire Door {did}</b><br>1.0m Keep-Clear Egress Zone<extra></extra>",
+                                    showlegend=True,
+                                )
+                            )
+                except Exception:
+                    pass
+
     # 4. Render Landmarks
     for class_name in class_names:
         is_floor = str(class_name).strip().lower() in ("floor", "navigable_floor")

@@ -1592,18 +1592,7 @@ def main() -> None:
     from export_clean_rrd import export_clean_rrd
     from hospital_compliance import HospitalComplianceEvaluator, generate_markdown_report
 
-    html_path = refresh_semantic_map_html(db_path, Path(args.ontology).resolve())
-    LOG.info("[HTML ] Current semantic-map viewer written: %s", html_path)
-
-    # 1. Export canonical lightweight RRD (< 2 MB) for instant sub-second visualization
-    canonical_rrd_path = db_path.with_name("world_map.rrd")
-    try:
-        export_clean_rrd(db_path, canonical_rrd_path)
-        LOG.info("[RERUN] Canonical 3D digital twin written: %s", canonical_rrd_path)
-    except Exception as exc:
-        LOG.warning("Failed to export canonical RRD: %s", exc)
-
-    # 2. Hospital Health & Safety Compliance Audit (KMi Spatial Reasoner)
+    # 1. Hospital Health & Safety Compliance Audit (KMi Spatial Reasoner + Andrea's Egress Zones)
     comp_md_path = db_path.with_name("hospital_compliance_report.md")
     comp_json_path = db_path.with_name("hospital_compliance_report.json")
     try:
@@ -1618,6 +1607,18 @@ def main() -> None:
                  comp_status, comp_report["total_violations"], comp_md_path)
     except Exception as exc:
         LOG.warning("Failed to evaluate hospital compliance: %s", exc)
+
+    # 2. Export canonical lightweight RRD (< 3 MB) for instant sub-second visualization
+    canonical_rrd_path = db_path.with_name("world_map.rrd")
+    try:
+        export_clean_rrd(db_path, canonical_rrd_path)
+        LOG.info("[RERUN] Canonical 3D digital twin written: %s", canonical_rrd_path)
+    except Exception as exc:
+        LOG.warning("Failed to export canonical RRD: %s", exc)
+
+    # 3. Export canonical interactive HTML 3D Digital Twin
+    html_path = refresh_semantic_map_html(db_path, Path(args.ontology).resolve())
+    LOG.info("[HTML ] Current semantic-map viewer written: %s", html_path)
 
     # ── Report ────────────────────────────────────────────────────────────────
     LOG.info("=" * 78)

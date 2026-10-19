@@ -3,13 +3,15 @@ Automated Hospital Health & Safety (H&S) Compliance Reasoner.
 
 Evaluates 3D Semantic Map digital twins against real-world UK fire and safety
 inspection regulations, implementing the qualitative spatial reasoning framework
-from the Knowledge Media Institute (KMi, Open University; Ibba et al., 2026).
+from the Knowledge Media Institute (KMi, Open University; Ibba et al., 2026),
+integrated with Andrea's NHS / UK Building Regulations Approved Document B
+fire door keep-clear half-cylinder zones (Obstruction_detection.py / door_zone_rgbd.py).
 
 Evaluated Rules:
-1. Emergency Fire Exit Doorway Clearance (No obstruction within 0.9m)
-2. Portable Fire Extinguisher Mounting & Accessibility (Wall-mounted or stand; unobstructed)
-3. Main Walkway / Evacuation Corridor Clearance
-4. Ignition Hazard Separation (Combustibles/waste away from electrical sockets)
+1. Emergency Fire Exit Doorway Clearance (No obstruction within 1.0m half-cylinder swing zone; min 0.85m clear width)
+2. Portable Fire Extinguisher Mounting & Accessibility (Wall-mounted or stand >= 0.20m; unobstructed)
+3. Main Walkway / Evacuation Corridor Clearance (No trip hazards on floor space)
+4. Ignition Hazard Separation (Combustibles/waste separated >= 0.60m from electrical ignition sources)
 5. Liquid Spillage Identification & Immediate Hazard Isolation
 """
 
@@ -22,35 +24,28 @@ import sqlite3
 import sys
 from typing import Any
 
+import numpy as np
+
 BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from spatial_predicates import (
+    COMBUSTIBLE_CLASSES,
+    IGNITION_CLASSES,
+    MOVABLE_OBSTACLE_CLASSES,
     BoundingBox3D,
+    DoorKeepClearZone3D,
+    SceneEdge,
+    SceneNode,
     SpatialSceneGraph,
+    is_adjacent,
     is_blocking,
     is_contained_in_polygon,
     is_near,
     is_on_top_of,
     touches,
 )
-
-
-MOVABLE_OBSTACLE_CLASSES = {
-    "chair", "hospital_stretcher", "utility_trolley", "bin", "general_bin",
-    "yellow_bin", "bin_tiger_stripe", "suitcase", "medical_tray", "dining table",
-    "bench_hosp", "box",
-}
-
-COMBUSTIBLE_CLASSES = {
-    "general_bin", "yellow_bin", "bin_tiger_stripe", "bin", "suitcase",
-    "paper", "cardboard", "linen", "waste",
-}
-
-IGNITION_CLASSES = {
-    "power_socket", "electrical_cabinet", "fuse_box", "radiator",
-}
 
 
 class HospitalComplianceEvaluator:
@@ -60,8 +55,16 @@ class HospitalComplianceEvaluator:
             raise FileNotFoundError(f"Database not found: {self.db_path}")
         self.landmarks: list[dict[str, Any]] = []
         self.zones: list[dict[str, Any]] = []
+        self.camera_poses: list[tuple[float, float, float]] = []
         self._load_database()
-        self.scene_graph = SpatialSceneGraph(self.landmarks)
+
+        # Build formal ConceptGraphs 3D scene graph with deterministic QSR math
+        self.scene_graph = SpatialSceneGraph(
+            landmarks=self.landmarks,
+            floor_elevation_z=0.05,
+            navigable_zones=self.zones,
+            camera_poses=self.camera_poses,
+        )
         self.edges = self.scene_graph.compute_spatial_edges(max_pair_dist_m=2.0)
 
     def _load_database(self) -> None:
@@ -72,6 +75,11 @@ class HospitalComplianceEvaluator:
             self.zones = [dict(r) for r in conn.execute("SELECT * FROM navigable_zones").fetchall()]
         except Exception:
             self.zones = []
+        try:
+            pose_rows = conn.execute("SELECT X, Y, Z FROM camera_poses WHERE X IS NOT NULL").fetchall()
+            self.camera_poses = [(float(r["X"]), float(r["Y"]), float(r["Z"])) for r in pose_rows]
+        except Exception:
+            self.camera_poses = []
         conn.close()
 
     def evaluate_all(self) -> dict[str, Any]:
@@ -84,48 +92,126 @@ class HospitalComplianceEvaluator:
             self._check_spillage_hazards(),
         ]
 
+        # Flatten violations for direct consumption by RRD and HTML renderers
+        flat_violations = []
+        for c in checks:
+            rule_id = c["rule_id"]
+            for v in c["violations"]:
+                entry = dict(v)
+                entry["rule_id"] = rule_id
+                entry["rule_title"] = c["rule_title"]
+                if rule_id == "HS-01-DOOR-CLEARANCE":
+                    door_lbl = f"door {v.get('door_instance') or v.get('door_id')}"
+                    entry["target"] = door_lbl
+                    for obs in v.get("obstructing_items", []):
+                        obs_lbl = f"{obs['obstacle_class']} {obs.get('obstacle_instance') or obs['obstacle_id']}"
+                        flat_entry = dict(entry)
+                        flat_entry["object"] = obs_lbl
+                        flat_entry["target"] = door_lbl
+                        flat_entry["measured_distance_m"] = obs.get("distance_m")
+                        flat_violations.append(flat_entry)
+                elif rule_id == "HS-04-IGNITION-SEPARATION":
+                    comb_lbl = f"{v.get('combustible_class')} {v.get('combustible_instance') or v.get('combustible_id')}"
+                    for ign in v.get("near_ignitions", []):
+                        ign_lbl = f"{ign['ignition_class']} {ign.get('ignition_instance') or ign['ignition_id']}"
+                        flat_entry = dict(entry)
+                        flat_entry["object"] = comb_lbl
+                        flat_entry["target"] = ign_lbl
+                        flat_entry["measured_distance_m"] = ign.get("distance_m")
+                        flat_violations.append(flat_entry)
+                else:
+                    obj_class = v.get("class_name") or ("fire_extinguisher" if "EXTINGUISHER" in rule_id else "spillage")
+                    inst_id = v.get("instance_id") or v.get("obstacle_id") or v.get("extinguisher_id") or v.get("spillage_id")
+                    flat_entry = dict(entry)
+                    flat_entry["object"] = f"{obj_class} {inst_id}"
+                    flat_violations.append(flat_entry)
+
         violations_count = sum(len(c["violations"]) for c in checks)
         overall_compliant = bool(violations_count == 0)
+
+        # Persist scene graph to database and export JSON
+        try:
+            persisted_edges = self.scene_graph.persist_to_sqlite(self.db_path)
+            json_graph_path = self.db_path.with_name("spatial_scene_graph.json")
+            self.scene_graph.export_json(json_graph_path)
+        except Exception as exc:
+            persisted_edges = 0
 
         report = {
             "database": str(self.db_path),
             "total_landmarks_analyzed": len(self.landmarks),
             "total_spatial_edges_evaluated": len(self.edges),
+            "spatial_edges_persisted_to_db": persisted_edges,
             "overall_compliant": overall_compliant,
             "total_violations": violations_count,
+            "violations": flat_violations,
             "rules": checks,
         }
         return report
 
     def _check_door_clearance(self) -> dict[str, Any]:
-        """Rule 1: Are all emergency fire doors and escape exits kept clear and unobstructed?"""
+        """
+        Rule 1: Are all emergency fire doors and escape exits kept clear and unobstructed?
+        Evaluates 3D keep-clear half-cylinder zones (radius 1.0m) and 0.85m minimum passage width
+        operationalized from Obstruction_detection.py and Andrea's fire safety rules.
+        """
         doors = [lm for lm in self.landmarks if "door" in str(lm["class_name"]).lower()]
         violations = []
         passed = []
 
         for door in doors:
             did = int(door["landmark_id"])
-            door_box = self.scene_graph.boxes[did]
+            dzone = self.scene_graph.door_zones.get(did)
+            door_box = self.scene_graph.nodes[did].bbox
             obstructing = []
 
             for lm in self.landmarks:
                 oid = int(lm["landmark_id"])
                 if oid == did:
                     continue
-                cname = str(lm["class_name"]).lower()
-                if cname not in MOVABLE_OBSTACLE_CLASSES:
+                node_obs = self.scene_graph.nodes.get(oid)
+                if not node_obs or not node_obs.is_movable:
                     continue
 
-                box = self.scene_graph.boxes[oid]
-                lat_dist = box.lateral_distance_to(door_box)
-                if lat_dist < 0.90 and is_blocking(box, door_box, threshold_m=0.90):
-                    obstructing.append({
-                        "obstacle_id": oid,
-                        "obstacle_class": lm["class_name"],
-                        "obstacle_instance": lm.get("instance_id"),
-                        "distance_m": round(lat_dist, 2),
-                        "coordinates": (round(float(lm["X"]), 2), round(float(lm["Y"]), 2), round(float(lm["Z"]), 2)),
-                    })
+                box = node_obs.bbox
+
+                # Use 3D keep-clear half-cylinder egress zone check
+                if dzone is not None:
+                    intersects, intrusion_m, deficit_m = dzone.intersects_box(box)
+
+                    # Also test surface points if present
+                    surf_raw = lm.get("surface_points_json")
+                    pts_penetrating = 0
+                    if surf_raw:
+                        try:
+                            pts = np.asarray(json.loads(surf_raw), dtype=np.float32)
+                            pts_int, pts_penetrating, _ = dzone.intersects_points(pts)
+                            intersects = intersects or pts_int
+                        except Exception:
+                            pass
+
+                    if intersects:
+                        obstructing.append({
+                            "obstacle_id": oid,
+                            "obstacle_class": lm["class_name"],
+                            "obstacle_instance": lm.get("instance_id"),
+                            "distance_m": round(box.distance_to(door_box), 2),
+                            "intrusion_depth_m": round(intrusion_m, 2),
+                            "clear_width_deficit_m": round(deficit_m, 2),
+                            "surface_points_penetrating": pts_penetrating,
+                            "coordinates": (round(float(lm["X"]), 2), round(float(lm["Y"]), 2), round(float(lm["Z"]), 2)),
+                        })
+                else:
+                    # Fallback check
+                    lat_dist = box.lateral_distance_to(door_box)
+                    if lat_dist < 1.0 and is_blocking(box, door_box, threshold_m=1.0):
+                        obstructing.append({
+                            "obstacle_id": oid,
+                            "obstacle_class": lm["class_name"],
+                            "obstacle_instance": lm.get("instance_id"),
+                            "distance_m": round(lat_dist, 2),
+                            "coordinates": (round(float(lm["X"]), 2), round(float(lm["Y"]), 2), round(float(lm["Z"]), 2)),
+                        })
 
             if obstructing:
                 violations.append({
@@ -133,7 +219,7 @@ class HospitalComplianceEvaluator:
                     "door_instance": door.get("instance_id"),
                     "coordinates": (round(float(door["X"]), 2), round(float(door["Y"]), 2), round(float(door["Z"]), 2)),
                     "obstructing_items": obstructing,
-                    "reason": f"Doorway is obstructed by {len(obstructing)} nearby item(s) within <0.9m clearance.",
+                    "reason": f"Fire door egress is obstructed by {len(obstructing)} movable item(s) within the 1.0m keep-clear swing zone.",
                 })
             else:
                 passed.append({
@@ -144,7 +230,7 @@ class HospitalComplianceEvaluator:
 
         return {
             "rule_id": "HS-01-DOOR-CLEARANCE",
-            "rule_title": "Fire Exit Doorway & Evacuation Route Clearance",
+            "rule_title": "Fire Exit Doorway & Evacuation Route Clearance (1.0m Egress Zone)",
             "compliant": len(violations) == 0,
             "items_checked": len(doors),
             "violations": violations,
@@ -167,7 +253,7 @@ class HospitalComplianceEvaluator:
                     "instance_id": ext.get("instance_id"),
                     "elevation_z": round(cz, 2),
                     "coordinates": (round(float(ext["X"]), 2), round(float(ext["Y"]), 2), round(cz, 2)),
-                    "reason": "Fire extinguisher is unmounted and resting directly on the floor without an approved stand.",
+                    "reason": "Fire extinguisher is unmounted and resting directly on the floor (<0.20m) without an approved stand.",
                 })
             else:
                 passed.append({
@@ -198,6 +284,7 @@ class HospitalComplianceEvaluator:
             iid = int(item["landmark_id"])
             cname = str(item["class_name"]).lower()
             cz = float(item["Z"])
+
             if cz <= 0.60:  # Low-lying obstacle on floor
                 violations.append({
                     "obstacle_id": iid,
@@ -205,7 +292,7 @@ class HospitalComplianceEvaluator:
                     "instance_id": item.get("instance_id"),
                     "elevation_z": round(cz, 2),
                     "coordinates": (round(float(item["X"]), 2), round(float(item["Y"]), 2), round(cz, 2)),
-                    "reason": f"Potential tripping hazard: {item['class_name']} resting in corridor floor space.",
+                    "reason": f"Potential tripping hazard: {item['class_name']} resting in corridor circulation space.",
                 })
             else:
                 passed.append(iid)
@@ -228,12 +315,12 @@ class HospitalComplianceEvaluator:
 
         for comb in combustibles:
             cid = int(comb["landmark_id"])
-            cbox = self.scene_graph.boxes[cid]
+            cbox = self.scene_graph.nodes[cid].bbox
             hazardous_near = []
 
             for ign in ignitions:
                 iid = int(ign["landmark_id"])
-                ibox = self.scene_graph.boxes[iid]
+                ibox = self.scene_graph.nodes[iid].bbox
                 dist = cbox.distance_to(ibox)
                 if dist < 0.60:
                     hazardous_near.append({
@@ -299,7 +386,8 @@ def generate_markdown_report(report: dict[str, Any]) -> str:
         f"**Status:** {badge} **{status_str}**",
         f"**Database:** `{report['database']}`",
         f"**Landmarks Analyzed:** {report['total_landmarks_analyzed']}",
-        f"**Total Spatial Edges Checked:** {report['total_spatial_edges_evaluated']}",
+        f"**Total Spatial Edges Evaluated:** {report['total_spatial_edges_evaluated']}",
+        f"**Spatial Edges Persisted:** {report.get('spatial_edges_persisted_to_db', 0)}",
         f"**Total Violations Detected:** {report['total_violations']}",
         "",
         "---",
@@ -322,7 +410,9 @@ def generate_markdown_report(report: dict[str, Any]) -> str:
                     md.append(f"    - Location: `(X={coords[0]:.2f}, Y={coords[1]:.2f}, Z={coords[2]:.2f})`")
                 if v.get("obstructing_items"):
                     for obs in v["obstructing_items"]:
-                        md.append(f"    - Obstructing Item: `{obs['obstacle_class']} {obs['obstacle_instance']}` at distance `{obs['distance_m']}m`")
+                        obs_detail = f"{obs['obstacle_class']} {obs.get('obstacle_instance') or obs['obstacle_id']}"
+                        intrus = f", Intrusion: {obs.get('intrusion_depth_m')}m" if obs.get("intrusion_depth_m") is not None else ""
+                        md.append(f"    - Obstructing Item: `{obs_detail}` at distance `{obs['distance_m']}m`{intrus}")
         else:
             md.append("- **Violations:** None. All inspected items satisfy regulatory constraints.")
         md.append("")

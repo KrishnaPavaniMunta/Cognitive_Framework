@@ -173,6 +173,32 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
         except Exception as exc:
             print(f"Warning: could not log compliance hazards to RRD: {exc}")
 
+    # 5. Log 3D Door Keep-Clear Egress Zones (Andrea's 1.0m half-cylinder swing zones)
+    graph_path = db_path.with_name("spatial_scene_graph.json")
+    if graph_path.exists():
+        try:
+            with open(graph_path, "r", encoding="utf-8") as f:
+                graph_data = json.load(f)
+            door_zones = graph_data.get("door_keep_clear_zones", [])
+            for dz in door_zones:
+                did = dz.get("door_id")
+                arc = dz.get("arc_samples_3d", [])
+                if arc and len(arc) >= 3:
+                    center_pt = (dz["center"][0], dz["center"][1], dz["z_bounds"][0])
+                    closed_arc = [center_pt] + [tuple(p) for p in arc] + [center_pt]
+                    rr.log(
+                        f"world/door_zones/door_{did}_zone",
+                        rr.LineStrips3D(
+                            [np.asarray(closed_arc, dtype=np.float32)],
+                            colors=[[220, 70, 70]],
+                            radii=0.018,
+                            labels=[f"Door {did} Keep-Clear Zone (r={dz.get('radius_m', 1.0)}m)"],
+                        ),
+                        static=True,
+                    )
+        except Exception as exc:
+            print(f"Warning: could not log door keep-clear zones to RRD: {exc}")
+
     conn.close()
     print(f"Exported {count} landmarks and trajectory to {out_rrd} (size: {out_rrd.stat().st_size / 1024:.1f} KB)")
     return out_rrd
@@ -184,6 +210,6 @@ if __name__ == "__main__":
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
-    out_file = args.out or args.db.with_name("semantic_map_clean.rrd")
+    out_file = args.out or args.db.with_name("world_map.rrd")
     export_clean_rrd(args.db, out_file)
 
