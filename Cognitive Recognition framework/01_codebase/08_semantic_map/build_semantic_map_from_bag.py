@@ -1595,13 +1595,13 @@ def main() -> None:
     html_path = refresh_semantic_map_html(db_path, Path(args.ontology).resolve())
     LOG.info("[HTML ] Current semantic-map viewer written: %s", html_path)
 
-    # 1. Export clean lightweight RRD (<1 MB) for instant sub-second visualization
-    clean_rrd_path = db_path.with_name("semantic_map_clean.rrd")
+    # 1. Export canonical lightweight RRD (< 2 MB) for instant sub-second visualization
+    canonical_rrd_path = db_path.with_name("world_map.rrd")
     try:
-        export_clean_rrd(db_path, clean_rrd_path)
-        LOG.info("[RERUN] Lightweight scene written: %s", clean_rrd_path)
+        export_clean_rrd(db_path, canonical_rrd_path)
+        LOG.info("[RERUN] Canonical 3D digital twin written: %s", canonical_rrd_path)
     except Exception as exc:
-        LOG.warning("Failed to export clean RRD: %s", exc)
+        LOG.warning("Failed to export canonical RRD: %s", exc)
 
     # 2. Hospital Health & Safety Compliance Audit (KMi Spatial Reasoner)
     comp_md_path = db_path.with_name("hospital_compliance_report.md")
@@ -1683,9 +1683,8 @@ def main() -> None:
     LOG.info("Log file : %s", run_dir / "run.log")
     LOG.info("History  : %s", history_dir / f"{run_id}.json")
     if args.rerun:
-        LOG.info("Rerun    : %s", rrd_path)
-    LOG.info("Rerun 3D : %s", clean_rrd_path)
-    LOG.info("HTML     : %s", html_path)
+        LOG.info("Rerun 3D : %s", canonical_rrd_path)
+    LOG.info("HTML 3D  : %s", html_path)
     LOG.info("Audit    : %s", comp_md_path)
     if not args.no_video:
         LOG.info("Preview  : %s", video_path)
