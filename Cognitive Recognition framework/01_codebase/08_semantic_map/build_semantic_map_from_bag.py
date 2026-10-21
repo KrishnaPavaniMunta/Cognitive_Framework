@@ -1191,6 +1191,13 @@ def main() -> None:
         LOG.info("[RERUN] Logging 3D scene to %s", rrd_path)
     writer: cv2.VideoWriter | None = None
     video_path = run_dir / "preview.mp4"
+    preview_cap: cv2.VideoCapture | None = None
+    if args.rerun_only and video_path.exists():
+        preview_cap = cv2.VideoCapture(str(video_path))
+        if preview_cap.isOpened():
+            LOG.info("[RERUN] Using existing annotated video from %s for 2D camera playback", video_path.name)
+        else:
+            preview_cap = None
     if not args.no_preview:
         cv2.namedWindow("Semantic Map Builder", cv2.WINDOW_NORMAL)
 
@@ -1515,17 +1522,25 @@ def main() -> None:
                     LOG.debug("[DISCOVERY] Error in residual clustering: %s", exc)
                 db.conn.commit()
 
+            annotated = None
+            if preview_cap is not None:
+                ret_prev, prev_frame = preview_cap.read()
+                if ret_prev:
+                    annotated = prev_frame
+
+            if annotated is None:
+                annotated = annotate(rgb_img, processed_counter, rgb_item.timestamp_ns,
+                                     pins, len(db.landmarks), extrinsics_status)
+
             if pose_matrix is not None:
                 db.add_camera_pose(processed_counter, rgb_item.timestamp_ns, world_frame,
                                    normalize_frame(camera_frame_id), extrinsics_status, pose_matrix)
                 if scene is not None:
                     scene.log_frame(processed_counter, rgb_item.timestamp_ns,
-                                    rgb_img, depth_mm, intr, pose_matrix, detections=pins)
+                                    rgb_img, depth_mm, intr, pose_matrix, detections=pins,
+                                    annotated_frame=annotated)
 
-            annotated = annotate(rgb_img, processed_counter, rgb_item.timestamp_ns,
-                                 pins, len(db.landmarks), extrinsics_status)
-
-            if not args.no_video:
+            if not args.no_video and preview_cap is None:
                 if writer is None:
                     h, w = annotated.shape[:2]
                     writer = cv2.VideoWriter(str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), 15.0, (w, h))
@@ -1547,6 +1562,8 @@ def main() -> None:
         LOG.warning("[USER] KeyboardInterrupt - stopping early.")
         interrupted = True
     finally:
+        if preview_cap is not None:
+            preview_cap.release()
         dedup_count = db.consolidate_landmarks()
         if dedup_count > 0:
             LOG.info("[MAP ] Consolidated %d duplicate landmarks across runs.", dedup_count)

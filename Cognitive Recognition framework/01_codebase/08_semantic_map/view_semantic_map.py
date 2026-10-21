@@ -378,6 +378,14 @@ def main() -> None:
         return
 
     if args.rerun:
+        rrd_file = db_path.parent / "world_map.rrd"
+        if rrd_file.exists():
+            rerun_bin = sys.executable.replace("python.exe", "rerun.exe")
+            if Path(rerun_bin).exists():
+                print(f"Opening canonical 3D digital twin: {rrd_file}")
+                import subprocess
+                subprocess.Popen([str(rerun_bin), str(rrd_file)])
+                return
         render_rerun(landmarks, observations, trajectory, f"semantic_map/{db_path.parent.name}")
         return
 

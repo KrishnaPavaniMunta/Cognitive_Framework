@@ -368,6 +368,27 @@ class RerunSceneLogger:
         rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
         rr.log("world", self.annotation_manager.build_context(), static=True)
 
+        # Enforce strict single 3D Semantic Map + 2D Annotated Video layout
+        try:
+            import rerun.blueprint as rrb
+            blueprint = rrb.Blueprint(
+                rrb.Horizontal(
+                    rrb.Spatial3DView(
+                        origin="world",
+                        name="3D Semantic Map",
+                    ),
+                    rrb.Spatial2DView(
+                        origin="world/camera/image",
+                        name="Annotated 2D Video",
+                    ),
+                    column_shares=[3, 2],
+                ),
+                collapse_panels=False,
+            )
+            rr.send_blueprint(blueprint)
+        except Exception:
+            pass
+
     def _set_time(self, frame_index: int, timestamp_ns: int) -> None:
         try:
             rr.set_time("frame", sequence=frame_index)
@@ -384,6 +405,7 @@ class RerunSceneLogger:
         intrinsics,
         pose_matrix,
         detections: list[dict] | None = None,
+        annotated_frame: np.ndarray | None = None,
     ) -> None:
         self._set_time(frame_index, timestamp_ns)
 
@@ -396,46 +418,53 @@ class RerunSceneLogger:
             [[intrinsics.fx, 0.0, intrinsics.cx], [0.0, intrinsics.fy, intrinsics.cy], [0.0, 0.0, 1.0]],
             dtype=np.float32,
         )
+
+        # Build fully annotated frame with 2D segmentation masks, bounding boxes, and labels
+        if annotated_frame is not None:
+            annotated_rgb = annotated_frame
+        else:
+            annotated_rgb = rgb_bgr.copy()
+            for detection in detections or []:
+                x1, y1, x2, y2 = (int(round(value)) for value in detection["bbox_xyxy"])
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                class_name = str(detection["class_name"])
+                confidence = float(detection.get("confidence") or 0.0)
+                color = tuple(int(channel) for channel in class_color(class_name))
+
+                mask = detection.get("mask")
+                if overlay_mask_on_frame is not None and mask is not None and np.any(mask):
+                    overlay_mask_on_frame(annotated_rgb, mask, color, alpha=0.45, draw_contour=True)
+
+                cv2.rectangle(annotated_rgb, (x1, y1), (x2, y2), color, 2)
+
+                instance_label = f" {detection['instance_id']}" if detection.get("instance_id") is not None else ""
+                head = f"{class_name}{instance_label} {confidence:.0%}"
+                wx, wy, wz = detection.get("world_X"), detection.get("world_Y"), detection.get("world_Z")
+                dm = detection.get("depth_m")
+                if wx is not None and wy is not None and wz is not None:
+                    body = f"W({wx:.2f},{wy:.2f},{wz:.2f}) d={dm:.2f}m" if dm is not None else f"W({wx:.2f},{wy:.2f},{wz:.2f})"
+                else:
+                    body = f"d={dm:.2f}m" if dm is not None else ""
+
+                (tw1, th1), _ = cv2.getTextSize(head, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+                (tw2, th2), _ = cv2.getTextSize(body, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1) if body else ((0, 0), 0)
+                max_tw = max(tw1, tw2)
+                total_th = th1 + th2 + 6 if body else th1 + 2
+                badge_y1 = max(0, y1 - total_th - 8) if y1 > 35 else y2 + 2
+                badge_y2 = badge_y1 + total_th + 6
+                cv2.rectangle(annotated_rgb, (x1, badge_y1), (min(annotated_rgb.shape[1], x1 + max_tw + 8), badge_y2), (20, 20, 20), -1)
+                cv2.rectangle(annotated_rgb, (x1, badge_y1), (min(annotated_rgb.shape[1], x1 + max_tw + 8), badge_y2), color, 1)
+
+                cv2.putText(annotated_rgb, head, (x1 + 4, badge_y1 + th1 + 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+                if body:
+                    cv2.putText(annotated_rgb, body, (x1 + 4, badge_y1 + th1 + th2 + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (230, 230, 230), 1, cv2.LINE_AA)
+
+        # Primary camera feed: ALWAYS the annotated 2D video with segmentations & labels
+        annotated_rgb_converted = cv2.cvtColor(annotated_rgb, cv2.COLOR_BGR2RGB)
         rr.log("world/camera/image", rr.Pinhole(image_from_camera=k, resolution=[width, height]))
-        rr.log("world/camera/image", rr.Image(cv2.cvtColor(rgb_bgr, cv2.COLOR_BGR2RGB)))
-
-        annotated_rgb = rgb_bgr.copy()
-        for detection in detections or []:
-            x1, y1, x2, y2 = (int(round(value)) for value in detection["bbox_xyxy"])
-            if x2 <= x1 or y2 <= y1:
-                continue
-            class_name = str(detection["class_name"])
-            confidence = float(detection.get("confidence") or 0.0)
-            color = tuple(int(channel) for channel in class_color(class_name))
-
-            mask = detection.get("mask")
-            if overlay_mask_on_frame is not None and mask is not None and np.any(mask):
-                overlay_mask_on_frame(annotated_rgb, mask, color, alpha=0.45, draw_contour=True)
-
-            cv2.rectangle(annotated_rgb, (x1, y1), (x2, y2), color, 2)
-
-            instance_label = f" {detection['instance_id']}" if detection.get("instance_id") is not None else ""
-            head = f"{class_name}{instance_label} {confidence:.0%}"
-            wx, wy, wz = detection.get("world_X"), detection.get("world_Y"), detection.get("world_Z")
-            dm = detection.get("depth_m")
-            if wx is not None and wy is not None and wz is not None:
-                body = f"W({wx:.2f},{wy:.2f},{wz:.2f}) d={dm:.2f}m" if dm is not None else f"W({wx:.2f},{wy:.2f},{wz:.2f})"
-            else:
-                body = f"d={dm:.2f}m" if dm is not None else ""
-
-            (tw1, th1), _ = cv2.getTextSize(head, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-            (tw2, th2), _ = cv2.getTextSize(body, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1) if body else ((0, 0), 0)
-            max_tw = max(tw1, tw2)
-            total_th = th1 + th2 + 6 if body else th1 + 2
-            badge_y1 = max(0, y1 - total_th - 8) if y1 > 35 else y2 + 2
-            badge_y2 = badge_y1 + total_th + 6
-            cv2.rectangle(annotated_rgb, (x1, badge_y1), (min(annotated_rgb.shape[1], x1 + max_tw + 8), badge_y2), (20, 20, 20), -1)
-            cv2.rectangle(annotated_rgb, (x1, badge_y1), (min(annotated_rgb.shape[1], x1 + max_tw + 8), badge_y2), color, 1)
-
-            cv2.putText(annotated_rgb, head, (x1 + 4, badge_y1 + th1 + 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
-            if body:
-                cv2.putText(annotated_rgb, body, (x1 + 4, badge_y1 + th1 + th2 + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (230, 230, 230), 1, cv2.LINE_AA)
-        rr.log("world/camera/annotated_image", rr.Image(cv2.cvtColor(annotated_rgb, cv2.COLOR_BGR2RGB)))
+        rr.log("world/camera/image", rr.Image(annotated_rgb_converted))
+        rr.log("world/camera/annotated_image", rr.Image(annotated_rgb_converted))
 
         if frame_index % self.cloud_every_n_frames == 0:
             self._log_cloud(rgb_bgr, depth_mm, intrinsics, pose_matrix, detections=detections)
@@ -547,7 +576,7 @@ class RerunSceneLogger:
             self.floor_z_count += len(pts_floor)
 
         rr.log(
-            f"world/map/cloud_{self.cloud_chunks:05d}",
+            f"world/environment_point_cloud/cloud_{self.cloud_chunks:05d}",
             rr.Points3D(
                 points_world.astype(np.float32),
                 colors=colors,
@@ -563,7 +592,7 @@ class RerunSceneLogger:
             sem_cids = class_ids[semantic_mask]
             sem_colors = np.array([class_color(self.annotation_manager.get_name(cid)) for cid in sem_cids], dtype=np.uint8)
             rr.log(
-                f"world/map/semantic_cloud_{self.cloud_chunks:05d}",
+                f"world/environment_point_cloud/semantic_cloud_{self.cloud_chunks:05d}",
                 rr.Points3D(
                     sem_pts,
                     colors=sem_colors,
