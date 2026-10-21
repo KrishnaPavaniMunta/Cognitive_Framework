@@ -919,8 +919,8 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--no-preview", action="store_true", help="Disable the live OpenCV preview window")
     p.add_argument("--no-video", action="store_true", help="Do not record preview.mp4")
-    p.add_argument("--rerun", action="store_true",
-                   help="Export a new full world_map.rrd snapshot")
+    p.add_argument("--rerun", action="store_true", default=True,
+                   help="Export a new full world_map.rrd snapshot (default: True)")
     p.add_argument("--rerun-only", action="store_true",
                    help="Geometry and cloud replay only, preserving persistent landmarks from world_map.db without re-running detector inference")
     p.add_argument("--no-rerun", action="store_false", dest="rerun",

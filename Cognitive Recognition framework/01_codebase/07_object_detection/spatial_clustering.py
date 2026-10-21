@@ -66,6 +66,11 @@ class ResidualSpatialClustering:
                 self.cy = float(intrinsics[1, 2])
             else:
                 self.fx, self.fy, self.cx, self.cy = (float(v) for v in intrinsics.flatten()[:4])
+        elif hasattr(intrinsics, "fx"):
+            self.fx = float(intrinsics.fx)
+            self.fy = float(intrinsics.fy)
+            self.cx = float(intrinsics.cx)
+            self.cy = float(intrinsics.cy)
         else:
             self.fx, self.fy, self.cx, self.cy = (float(v) for v in intrinsics[:4])
 

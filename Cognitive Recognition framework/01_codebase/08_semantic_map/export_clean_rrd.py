@@ -52,27 +52,36 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
     if archive_candidates and Path(rerun_bin).exists():
         latest_archive = archive_candidates[0]
         try:
-            # Filter out heavy uncompressed video frames (1080p RGB images)
-            cmd_filter = [
-                str(rerun_bin), "rrd", "filter",
-                "--drop-entity", "/world/camera/annotated_image",
-                "--drop-entity", "/world/camera/image",
-                "-o", str(temp_cloud_rrd),
-                str(latest_archive)
-            ]
-            res = subprocess.run(cmd_filter, capture_output=True, text=True, timeout=30)
-            if res.returncode == 0 and temp_cloud_rrd.exists() and temp_cloud_rrd.stat().st_size > 10000:
+            # Preserve the existing dense environment point clouds and camera video feeds
+            shutil.copy2(latest_archive, temp_cloud_rrd)
+            if temp_cloud_rrd.exists() and temp_cloud_rrd.stat().st_size > 10000:
                 dense_cloud_extracted = True
         except Exception as exc:
-            print(f"Warning: could not filter archive point cloud: {exc}")
+            print(f"Warning: could not preserve archive point cloud: {exc}")
 
     # 2. Write semantic landmarks, door keep-clear volumes, and hazards
     target_write_rrd = temp_semantic_rrd if dense_cloud_extracted else out_rrd
     if target_write_rrd.exists():
         target_write_rrd.unlink()
 
-    rr.init("HospitalDigitalTwin", recording_id="semantic_map_clean")
+    app_id = f"semantic_map/{run_dir.name}"
+    rr.init(app_id, recording_id=f"canonical_{run_dir.name}")
     rr.save(str(target_write_rrd))
+
+    # Send strict single-map layout blueprint
+    try:
+        import rerun.blueprint as rrb
+        blueprint = rrb.Blueprint(
+            rrb.Horizontal(
+                rrb.Spatial3DView(origin="world", name="3D Semantic Map"),
+                rrb.Spatial2DView(origin="world/camera/image", name="Annotated 2D Video"),
+                column_shares=[3, 2],
+            ),
+            collapse_panels=False,
+        )
+        rr.send_blueprint(blueprint)
+    except Exception:
+        pass
 
     # Set right-hand Z-up coordinate system
     rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
