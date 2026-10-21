@@ -47,6 +47,17 @@ EMERGENCY_ASSET_CLASSES = {
     "fire_extinguisher", "fire_alarm", "emergency_exit_sign", "exit_sign", "call_point", "first_aid_kit",
 }
 
+WALL_FIXTURE_CLASSES = {
+    "radiator", "door", "fire_extinguisher", "fire extinguisher", "power_socket",
+    "electrical_cabinet", "fuse_box", "distribution_board", "hazmat_sign",
+    "whiteboard", "notice_board", "wall_screen",
+}
+
+CEILING_FIXTURE_CLASSES = {
+    "surgical_light", "security_camera", "cctv", "smoke_detector", "ceiling_light", "light",
+}
+
+
 
 # ── 3D Bounding Box Geometry ──────────────────────────────────────────────────
 
@@ -936,6 +947,78 @@ class SpatialSceneGraph:
                         evidence=f"3D Euclidean distance {dist_3d:.2f}m <= 1.0m",
                     ))
 
+        # ── 6. Environmental Room Structural Anchors ──────────────────────────
+        # Evaluates relations to macro architectural references: corridor floor,
+        # ceiling clearance, perimeter boundary walls, and circulation walkways.
+        for node in node_list:
+            box = node.bbox
+            cname = node.class_name.lower().strip()
+
+            # (a) on_floor: base resting on corridor floor plane (within tolerance)
+            dist_to_floor = abs(box.z_min - self.floor_elevation_z)
+            if box.z_min <= (self.floor_elevation_z + 0.18) and cname not in CEILING_FIXTURE_CLASSES:
+                self.edges.append(SceneEdge(
+                    source_id=node.node_id,
+                    source_class=node.class_name,
+                    target_id=0,
+                    target_class="structure:floor",
+                    predicate="on_floor",
+                    category="structural",
+                    metrics={"distance_m": round(dist_to_floor, 3), "z_min": round(box.z_min, 3)},
+                    evidence=f"Base elevation z_min={box.z_min:.2f}m rests on corridor floor (floor_z={self.floor_elevation_z:.2f}m)",
+                ))
+
+            # (b) near_ceiling: top elevated into ceiling clearance tier (>= 2.0m) or ceiling fixture
+            dist_to_ceiling = max(0.0, 2.40 - box.z_max)
+            if box.z_max >= 2.0 or cname in CEILING_FIXTURE_CLASSES or node.elevation_tier == "ceiling":
+                self.edges.append(SceneEdge(
+                    source_id=node.node_id,
+                    source_class=node.class_name,
+                    target_id=-1,
+                    target_class="structure:ceiling",
+                    predicate="near_ceiling",
+                    category="structural",
+                    metrics={"distance_m": round(dist_to_ceiling, 3), "z_max": round(box.z_max, 3)},
+                    evidence=f"Object elevated at z_max={box.z_max:.2f}m into ceiling zone (>= 2.0m)",
+                ))
+
+            # (c) along_wall: wall-mounted or perimeter architectural fixtures
+            is_wall_fixture = (
+                cname in WALL_FIXTURE_CLASSES
+                or any(w in cname for w in ("radiator", "socket", "cabinet", "door", "hazmat", "extinguisher", "whiteboard", "board"))
+                or (node.elevation_tier == "wall" and cname not in MOVABLE_OBSTACLE_CLASSES)
+            )
+            if is_wall_fixture:
+                self.edges.append(SceneEdge(
+                    source_id=node.node_id,
+                    source_class=node.class_name,
+                    target_id=-2,
+                    target_class="structure:wall",
+                    predicate="along_wall",
+                    category="structural",
+                    metrics={"distance_m": 0.0, "elevation_z": round(node.centroid[2], 3)},
+                    evidence=f"Perimeter/wall-mounted architectural fixture ({node.class_name}) along corridor boundary",
+                ))
+
+            # (d) in_walkway: movable uncontained items or spillages resting on the floor inside walkway
+            is_trip_hazard = ("spillage" in cname or "suitcase" in cname)
+            if (
+                box.z_min <= (self.floor_elevation_z + 0.20)
+                and (node.is_movable or is_trip_hazard)
+                and cname not in ("door", "radiator", "power_socket", "electrical_cabinet")
+            ):
+                self.edges.append(SceneEdge(
+                    source_id=node.node_id,
+                    source_class=node.class_name,
+                    target_id=-3,
+                    target_class="structure:corridor_walkway",
+                    predicate="in_walkway",
+                    category="structural",
+                    is_violation=is_trip_hazard,
+                    metrics={"distance_m": 0.0, "z_min": round(box.z_min, 3)},
+                    evidence=f"Movable/hazard item ({node.class_name}) resting within circulation walkway",
+                ))
+
         return self.edges
 
     def export_json(self, out_path: Path | None = None) -> dict[str, Any]:
@@ -966,6 +1049,12 @@ class SpatialSceneGraph:
                 }
                 for dz in self.door_zones.values()
             ],
+            "structural_anchors": [
+                {"anchor_id": 0, "name": "Floor Plane", "class": "structure:floor", "elevation_z": round(self.floor_elevation_z, 3)},
+                {"anchor_id": -1, "name": "Ceiling Zone", "class": "structure:ceiling", "elevation_z": 2.40},
+                {"anchor_id": -2, "name": "Corridor Boundary Wall", "class": "structure:wall"},
+                {"anchor_id": -3, "name": "Circulation Walkway", "class": "structure:corridor_walkway"},
+            ],
         }
         if out_path is not None:
             out_path = Path(out_path).resolve()
@@ -992,11 +1081,12 @@ class SpatialSceneGraph:
                 lateral_distance_m REAL,
                 is_violation INTEGER,
                 metrics_json TEXT,
-                evidence TEXT,
-                FOREIGN KEY(source_id) REFERENCES semantic_map(landmark_id),
-                FOREIGN KEY(target_id) REFERENCES semantic_map(landmark_id)
+                evidence TEXT
             )
         """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_spatial_edges_src ON spatial_edges(source_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_spatial_edges_pred ON spatial_edges(predicate)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_spatial_edges_cat ON spatial_edges(category)")
         cur.execute("DELETE FROM spatial_edges")
 
         rows = [

@@ -379,6 +379,7 @@ ul { margin:0; padding-left:18px; font-size:12px; line-height:1.55; }
 .badge-info { background:var(--accent-light); color:var(--accent); border:1px solid #7dd3fc; }
 .badge-purple { background:var(--purple-light); color:var(--purple); border:1px solid #c4b5fd; }
 .badge-warn { background:var(--warn-light); color:var(--warn); border:1px solid #fde68a; }
+.badge-teal { background:#ccfbf1; color:#0f766e; border:1px solid #5eead4; }
 .card { background:var(--card-bg); border:1px solid var(--line); border-radius:6px; padding:11px 13px; margin-bottom:10px; box-shadow:0 1px 2px rgba(0,0,0,0.03); }
 .card.hazard { border-color:#fca5a5; background:#fff5f5; }
 .card h3 { margin:0 0 4px; font-size:13px; font-weight:650; }
@@ -428,7 +429,21 @@ ul { margin:0; padding-left:18px; font-size:12px; line-height:1.55; }
   <div id="tab-qsr" class="tab-content" style="display:none;">
     <h1>Qualitative Spatial Relations (QSR)</h1>
     <div id="subtitle">Deterministic 3D Calculus & Egress Zones</div>
-    <div class="select-row">
+    <div class="select-row" style="margin-bottom:8px;">
+      <label style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Filter Map by Relation (Spatial Query):</label>
+      <select id="qsr-predicate-filter" onchange="onQsrPredicateFilterChange(this.value)">
+        <option value="">-- All Relations (Inspect Individual Landmark) --</option>
+        <option value="on_floor">on_floor (Corridor Floor Plane)</option>
+        <option value="along_wall">along_wall (Wall & Perimeter Fixtures)</option>
+        <option value="near_ceiling">near_ceiling (Ceiling Zone &gt;= 2.0m)</option>
+        <option value="in_walkway">in_walkway (Circulation Walkway / Hazards)</option>
+        <option value="touches">touches (Topological Contact)</option>
+        <option value="on_top_of">on_top_of (Support Surface)</option>
+        <option value="adjacent">adjacent (Lateral Contact &le; 0.35m)</option>
+        <option value="near">near (3D Proximity &le; 1.0m)</option>
+      </select>
+    </div>
+    <div class="select-row" id="qsr-landmark-row">
       <label style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Select Landmark to Inspect QSR:</label>
       <select id="qsr-select" onchange="onQsrDropdownSelect(this.value)">
         <option value="">-- Choose an object --</option>
@@ -661,6 +676,7 @@ function renderQSR(landmarkId) {
   }
 
   // Categorize edges
+  const structEdges = [];
   const topoEdges = [];
   const dirEdges = [];
   const proxEdges = [];
@@ -670,7 +686,12 @@ function renderQSR(landmarkId) {
     const otherId = isSource ? e.target_id : e.source_id;
     const otherClass = isSource ? e.target_class : e.source_class;
     const otherLm = allLandmarks.find(l => String(l.landmark_id) === String(otherId));
-    const otherName = otherLm ? otherLm.name : `${otherClass} #${otherId}`;
+    let otherName;
+    if (otherId === 0) otherName = "Floor Plane";
+    else if (otherId === -1) otherName = "Ceiling Zone (>=2.0m)";
+    else if (otherId === -2) otherName = "Corridor Boundary Wall";
+    else if (otherId === -3) otherName = "Circulation Walkway";
+    else otherName = otherLm ? otherLm.name : `${otherClass} #${otherId}`;
 
     const cat = (e.category || "").toLowerCase();
     const item = {
@@ -683,7 +704,9 @@ function renderQSR(landmarkId) {
       isViolation: Boolean(e.is_violation)
     };
 
-    if (cat === "topological" || ["touches", "adjacent", "on_top_of", "supports", "inside", "contains"].includes(e.predicate)) {
+    if (cat === "structural" || ["on_floor", "near_ceiling", "along_wall", "in_walkway"].includes(e.predicate)) {
+      structEdges.push(item);
+    } else if (cat === "topological" || ["touches", "adjacent", "on_top_of", "supports", "inside", "contains"].includes(e.predicate)) {
       topoEdges.push(item);
     } else if (cat === "directional" || ["above", "below", "front", "behind", "left", "right"].includes(e.predicate)) {
       dirEdges.push(item);
@@ -697,6 +720,9 @@ function renderQSR(landmarkId) {
     let gHtml = `<section><h2>${title} (${items.length})</h2><div class="qsr-rel-grid">`;
     items.forEach(it => {
       const predText = it.isSource ? it.predicate : `is_${it.predicate}_by`;
+      const targetDisplay = it.otherId > 0
+        ? `<span class="clickable-target" onclick="selectLandmarkById(${it.otherId})">${esc(it.otherName)}</span>`
+        : `<b>${esc(it.otherName)}</b>`;
       gHtml += `
         <div class="qsr-card">
           <div class="qsr-card-head">
@@ -704,7 +730,7 @@ function renderQSR(landmarkId) {
             <span class="qsr-metric">${it.dist != null ? it.dist.toFixed(2) + 'm' : ''}</span>
           </div>
           <div style="margin-top:3px;">
-            Target: <span class="clickable-target" onclick="selectLandmarkById(${it.otherId})">${esc(it.otherName)}</span>
+            Target: ${targetDisplay}
           </div>
           ${it.evidence ? `<div style="font-size:11px; color:var(--text-muted); margin-top:3px;">${esc(it.evidence)}</div>` : ''}
         </div>
@@ -718,10 +744,11 @@ function renderQSR(landmarkId) {
     html += `
       <section>
         <h2>Spatial Relationships</h2>
-        <div class="uri" style="margin-top:8px;">No pairwise QSR relationships (topological, directional, proximity) recorded within 1.0m metric threshold for this landmark.</div>
+        <div class="uri" style="margin-top:8px;">No pairwise QSR relationships or room structural anchors recorded for this landmark.</div>
       </section>
     `;
   } else {
+    html += renderGroup("Environmental Room Structural Anchors", structEdges, "badge-teal");
     html += renderGroup("Topological & Support Relations", topoEdges, "badge-purple");
     html += renderGroup("Directional Relations", dirEdges, "badge-info");
     html += renderGroup("Proximity & Metric Relations", proxEdges, "badge-warn");
@@ -734,6 +761,8 @@ function selectLandmarkById(id) {
   selectedLandmarkId = id;
   const select = document.getElementById("qsr-select");
   if (select) select.value = String(id);
+  const filterSelect = document.getElementById("qsr-predicate-filter");
+  if (filterSelect) filterSelect.value = "";
   renderQSR(id);
   const lm = allLandmarks.find(l => String(l.landmark_id) === String(id));
   if (lm && lm.payload) {
@@ -743,7 +772,86 @@ function selectLandmarkById(id) {
 
 function onQsrDropdownSelect(val) {
   if (!val) return;
+  const filterSelect = document.getElementById("qsr-predicate-filter");
+  if (filterSelect) filterSelect.value = "";
   selectLandmarkById(Number(val));
+}
+
+function onQsrPredicateFilterChange(pred) {
+  const container = document.getElementById("qsr-content");
+  const emptyMsg = document.getElementById("qsr-empty");
+  const qsrSelect = document.getElementById("qsr-select");
+
+  if (!pred) {
+    if (selectedLandmarkId) {
+      renderQSR(selectedLandmarkId);
+    } else {
+      emptyMsg.style.display = "block";
+      container.style.display = "none";
+    }
+    return;
+  }
+
+  if (qsrSelect) qsrSelect.value = "";
+  emptyMsg.style.display = "none";
+  container.style.display = "block";
+
+  const edges = (compliance && compliance.spatial_edges) ? compliance.spatial_edges : [];
+  const matched = edges.filter(e => e.predicate === pred);
+
+  let html = `
+    <div class="card" style="margin-top:4px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2 style="margin:0; font-size:13px; color:var(--text);">Spatial Query: <code>${esc(pred)}</code></h2>
+        <span class="badge badge-teal">${matched.length} Matched</span>
+      </div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+        Showing all landmarks across the digital twin satisfying predicate <code>${esc(pred)}</code>.
+      </div>
+    </div>
+    <section>
+      <h2>Matching Landmarks (${matched.length})</h2>
+      <div class="qsr-rel-grid">
+  `;
+
+  if (matched.length === 0) {
+    html += `<div class="uri" style="margin-top:8px;">No landmarks currently satisfy predicate <code>${esc(pred)}</code>.</div>`;
+  } else {
+    matched.forEach(e => {
+      const srcLm = allLandmarks.find(l => String(l.landmark_id) === String(e.source_id));
+      const srcName = srcLm ? srcLm.name : `${e.source_class} #${e.source_id}`;
+      let tgtName;
+      if (e.target_id === 0) tgtName = "Floor Plane";
+      else if (e.target_id === -1) tgtName = "Ceiling Zone";
+      else if (e.target_id === -2) tgtName = "Boundary Wall";
+      else if (e.target_id === -3) tgtName = "Circulation Walkway";
+      else {
+        const tgtLm = allLandmarks.find(l => String(l.landmark_id) === String(e.target_id));
+        tgtName = tgtLm ? tgtLm.name : `${e.target_class} #${e.target_id}`;
+      }
+
+      const targetDisplay = e.target_id > 0
+        ? `<span class="clickable-target" onclick="selectLandmarkById(${e.target_id})">${esc(tgtName)}</span>`
+        : `<b>${esc(tgtName)}</b>`;
+
+      html += `
+        <div class="qsr-card">
+          <div class="qsr-card-head">
+            <span class="badge ${e.is_violation ? 'badge-danger' : 'badge-teal'}">${esc(e.predicate)}</span>
+            <span class="qsr-metric">${e.metrics && e.metrics.distance_m != null ? e.metrics.distance_m.toFixed(2) + 'm' : ''}</span>
+          </div>
+          <div style="margin-top:3px; font-size:12px;">
+            <span class="clickable-target" onclick="selectLandmarkById(${e.source_id})">${esc(srcName)}</span>
+            &rarr; ${targetDisplay}
+          </div>
+          ${e.evidence ? `<div style="font-size:11px; color:var(--text-muted); margin-top:3px;">${esc(e.evidence)}</div>` : ''}
+        </div>
+      `;
+    });
+  }
+
+  html += `</div></section>`;
+  container.innerHTML = html;
 }
 
 function renderInspector(payload) {
