@@ -81,7 +81,6 @@ def load_dimensions_config(dimensions_config_path: str | Path) -> dict[str, dict
         parsed[class_name] = values
 
     # 2. Parse human-curated typical dimensions from rdfs:comment in ontology.rdf
-    #    (e.g., reception_counter "200 × 110 × 70 cm", iv_stand "60 cm base × 150–220 cm height")
     for element in root.iter():
         class_uri = element.attrib.get(RDF_ABOUT)
         if not class_uri:
@@ -95,7 +94,6 @@ def load_dimensions_config(dimensions_config_path: str | Path) -> dict[str, dict
             continue
         comment = comment_node.text
 
-        # 3D bounding box pattern: W x H x D or W x D x H in cm
         match_3d = re.search(
             r"(?:dimensions|size).*?([0-9]+(?:\.[0-9]+)?)\s*[x×]\s*([0-9]+(?:\.[0-9]+)?)\s*[x×]\s*([0-9]+(?:\.[0-9]+)?)\s*cm",
             comment,
@@ -103,7 +101,6 @@ def load_dimensions_config(dimensions_config_path: str | Path) -> dict[str, dict
         )
         if match_3d:
             n1, n2, n3 = [float(v) / 100.0 for v in match_3d.groups()]
-            # Reception counter: 200 x 110 x 70 cm -> W=2.00m, H=1.10m, D=0.70m
             if "counter" in class_name.lower() or "W" in comment:
                 w, h, d = n1, n2, n3
             else:
@@ -122,7 +119,6 @@ def load_dimensions_config(dimensions_config_path: str | Path) -> dict[str, dict
             }
             continue
 
-        # Pole / stand pattern: base diameter x height range in cm
         match_pole = re.search(
             r"([0-9]+(?:\.[0-9]+)?)\s*cm\s*(?:base|diameter).*?([0-9]+(?:\.[0-9]+)?)[-–]([0-9]+(?:\.[0-9]+)?)\s*cm\s*height",
             comment,
@@ -178,11 +174,9 @@ def _backproject_depth_points(depth_mm, x1, y1, x2, y2, intrinsics, min_points=1
         return None
 
     valid_depths = depth_roi[valid_mask]
-    # Median depth naturally resists wall bleed through mesh/gaps
     z_med = float(np.median(valid_depths))
     fg_mask = valid_mask & (np.abs(depth_roi - z_med) <= 450.0)
 
-    # Mild erosion only when no neural mask was provided (neural masks are already precise)
     if mask is None and erosion_pixels > 0 and int(np.sum(fg_mask)) > 40:
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         eroded = cv2.erode(fg_mask.astype(np.uint8), kernel, iterations=1)
@@ -266,7 +260,6 @@ def extract_world_surface_points(
     if len(X) == 0:
         return None
 
-    # Subsample if too dense to keep downstream point cloud logging lightweight
     if len(X) > max_points:
         indices = np.random.choice(len(X), size=max_points, replace=False)
         X, Y, Z = X[indices], Y[indices], Z[indices]
@@ -287,6 +280,10 @@ def _fit_plane_from_points(points3d):
     normal = normal / norm
     if abs(float(normal[1])) < 0.5:
         return None
+
+    # In optical frame, Y is down. Orient normal pointing UP towards ceiling (normal[1] < 0)
+    if normal[1] > 0.0:
+        normal = -normal
 
     d = -float(np.dot(normal, p1))
     return normal, d
@@ -338,14 +335,14 @@ def estimate_floor_plane(depth_mm, intrinsics, *, lower_image_ratio=0.55, max_po
     return best_plane
 
 
-def estimate_box_floor_clearance(depth_mm, x1, y1, x2, y2, intrinsics, floor_plane, *, center_ratio=0.35):
+def estimate_box_floor_clearance(depth_mm, x1, y1, x2, y2, intrinsics, floor_plane, *, center_ratio=0.35, use_bottom=False):
     if floor_plane is None:
         return None
 
     box_w = max(1.0, float(x2) - float(x1))
     box_h = max(1.0, float(y2) - float(y1))
     cx = (float(x1) + float(x2)) * 0.5
-    cy = (float(y1) + float(y2)) * 0.5
+    cy = (float(y1) + float(y2)) * 0.5 if not use_bottom else float(y2) - 0.15 * box_h
     half_w = box_w * float(center_ratio) * 0.5
     half_h = box_h * float(center_ratio) * 0.5
 
@@ -364,7 +361,53 @@ def estimate_box_floor_clearance(depth_mm, x1, y1, x2, y2, intrinsics, floor_pla
     X, Y, Z = points
     point = np.array([np.median(X), np.median(Y), np.median(Z)], dtype=np.float32)
     normal, d = floor_plane
-    return float(abs(np.dot(normal, point) + d))
+    # Signed elevation above floor plane
+    return float(np.dot(normal, point) + d)
+
+
+def check_planar_backing(depth_mm: np.ndarray, x1: float, y1: float, x2: float, y2: float, *, max_gap_m: float = 0.35) -> bool:
+    """
+    Checks if a detected object (e.g. hazmat sign) has a physical vertical supporting
+    surface (wall, door, cabinet) directly behind or adjacent to it, rejecting floating artifacts.
+    """
+    h_img, w_img = depth_mm.shape[:2]
+    bx1, by1, bx2, by2 = int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))
+    bw = max(1, bx2 - bx1)
+    bh = max(1, by2 - by1)
+
+    inner = depth_mm[max(0, by1 + int(0.2 * bh)):min(h_img, by2 - int(0.2 * bh)),
+                     max(0, bx1 + int(0.2 * bw)):min(w_img, bx2 - int(0.2 * bw))]
+    valid_inner = inner[(inner > 200) & (inner < 8000)]
+    if len(valid_inner) < 10:
+        return True
+
+    d_obj_m = float(np.median(valid_inner)) / 1000.0
+
+    margin_x = max(4, int(bw * 0.25))
+    margin_y = max(4, int(bh * 0.25))
+
+    border_samples = []
+    if bx1 > margin_x:
+        border_samples.append(depth_mm[max(0, by1):min(h_img, by2), max(0, bx1 - margin_x):bx1])
+    if bx2 + margin_x < w_img:
+        border_samples.append(depth_mm[max(0, by1):min(h_img, by2), bx2:min(w_img, bx2 + margin_x)])
+    if by1 > margin_y:
+        border_samples.append(depth_mm[max(0, by1 - margin_y):by1, max(0, bx1):min(w_img, bx2)])
+    if by2 + margin_y < h_img:
+        border_samples.append(depth_mm[by2:min(h_img, by2 + margin_y), max(0, bx1):min(w_img, bx2)])
+
+    if not border_samples:
+        return True
+
+    border_depths = np.concatenate([s[(s > 200) & (s < 8000)] for s in border_samples if np.any((s > 200) & (s < 8000))])
+    if len(border_depths) < 20:
+        return True
+
+    d_border_m = float(np.median(border_depths)) / 1000.0
+    if (d_border_m - d_obj_m) > float(max_gap_m):
+        return False
+
+    return True
 
 
 DEFAULT_HOSPITAL_PHYSICAL_LIMITS: dict[str, dict[str, float]] = {
@@ -399,27 +442,50 @@ def apply_depth_size_filter(
     filtered = []
     removed_size = 0
     removed_spillage = 0
+    removed_camera = 0
+    removed_hazmat = 0
 
-    needs_floor_plane = enable_spillage_floor_gate and any(
-        str(name).replace("[DINO] ", "") == "spillage"
+    needs_floor_plane = any(
+        any(k in str(name).lower() for k in ("spillage", "spill", "camera", "hazmat"))
         for _, _, _, _, _, name in predictions
     )
     floor_plane = estimate_floor_plane(depth_mm, intrinsics) if needs_floor_plane else None
 
     for x1, y1, x2, y2, conf, name in predictions:
-        base_name = str(name).replace("[DINO] ", "")
+        base_name = str(name).replace("[DINO] ", "").lower()
 
-        if enable_spillage_floor_gate and base_name == "spillage" and floor_plane is not None:
-            floor_clearance_m = estimate_box_floor_clearance(depth_mm, x1, y1, x2, y2, intrinsics, floor_plane)
-            if floor_clearance_m is not None and floor_clearance_m > float(spillage_floor_clearance_m):
+        # ── 1. Spatial Common Sense: Security Camera ───────────────────────────
+        # Must be high-mounted near ceiling (>= 1.70m above floor). Rejects desk/floor brackets.
+        if "camera" in base_name and floor_plane is not None:
+            clearance_m = estimate_box_floor_clearance(depth_mm, x1, y1, x2, y2, intrinsics, floor_plane)
+            if clearance_m is not None and clearance_m < 1.70:
+                removed_camera += 1
+                continue
+
+        # ── 2. Spatial Common Sense: Spillage ──────────────────────────────────
+        # Must rest directly on the floor plane (|height| <= 0.12m). Rejects mid-air/wall spills.
+        if base_name in ("spillage", "spill") and floor_plane is not None:
+            clearance_m = estimate_box_floor_clearance(depth_mm, x1, y1, x2, y2, intrinsics, floor_plane, use_bottom=True)
+            if clearance_m is not None and (clearance_m > float(spillage_floor_clearance_m) or clearance_m < -0.15):
                 removed_spillage += 1
+                continue
+
+        # ── 3. Spatial Common Sense: Hazmat Sign ────────────────────────────────
+        # Must be wall/door mounted at visual eye level (0.60m to 2.40m), not floating in mid-air.
+        if "hazmat" in base_name:
+            if floor_plane is not None:
+                clearance_m = estimate_box_floor_clearance(depth_mm, x1, y1, x2, y2, intrinsics, floor_plane)
+                if clearance_m is not None and (clearance_m < 0.60 or clearance_m > 2.40):
+                    removed_hazmat += 1
+                    continue
+            if not check_planar_backing(depth_mm, x1, y1, x2, y2, max_gap_m=0.35):
+                removed_hazmat += 1
                 continue
 
         if not enable_bin_physical_gating and base_name in {"bin", "general_bin", "yellow_bin", "bin_tiger_stripe"}:
             filtered.append((x1, y1, x2, y2, conf, name))
             continue
 
-        # Chairs are exempt from physical dimension gating (variable orientations, occlusions, side views)
         if base_name == "chair":
             filtered.append((x1, y1, x2, y2, conf, name))
             continue
@@ -465,11 +531,12 @@ def apply_depth_size_filter(
 
         filtered.append((x1, y1, x2, y2, conf, name))
 
+    if removed_camera > 0:
+        print(f"  [SPATIAL 3D FILTER] Removed {removed_camera} fake security cameras below ceiling elevation (<1.70m).")
     if removed_spillage > 0:
-        print(
-            f"  [3D FLOOR FILTER] Removed {removed_spillage} spillage detections "
-            f"floating more than {float(spillage_floor_clearance_m):.2f} m above the floor plane."
-        )
+        print(f"  [SPATIAL 3D FILTER] Removed {removed_spillage} spillage detections not resting on the floor plane.")
+    if removed_hazmat > 0:
+        print(f"  [SPATIAL 3D FILTER] Removed {removed_hazmat} hazmat signs floating or outside wall elevation.")
     if removed_size > 0:
         print(f"  [3D POINT CLOUD FILTER] Rotational PCA filter removed {removed_size} false-positive detections.")
     return filtered

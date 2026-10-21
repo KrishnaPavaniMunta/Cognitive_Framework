@@ -1418,7 +1418,6 @@ def main() -> None:
                             pin["reject_reason"] = f"failed ontology dimension gate ({rw:.2f}x{rd:.2f}x{rh:.2f}m vs ontology W[{lim['min_w']}-{lim['max_w']}], H[{lim['min_h']}-{lim['max_h']}])"
                             LOG.debug("      %-18s dropped: failed ontology dimension gate (%.2fx%.2fx%.2fm vs ontology)",
                                       class_name, rw, rd, rh)
-                            pins.append(pin)
                             continue
                 else:
                     pin["real_width"] = pin["real_depth"] = pin["real_height"] = None
@@ -1432,7 +1431,6 @@ def main() -> None:
                     pin["reject_reason"] = extrinsics_status
                     LOG.debug("      %-18s cam=(%.2f,%.2f,%.2f) d=%.2fm -> dropped: %s",
                               class_name, cx, cy, cz, z_m, extrinsics_status)
-                    pins.append(pin)
                     continue
 
                 # Step 4
@@ -1440,6 +1438,26 @@ def main() -> None:
                 world_frame_seen.add(world_frame)
                 pin["world_X"], pin["world_Y"], pin["world_Z"] = wx, wy, wz
                 pin["world_frame"] = world_frame
+
+                # Spatial Common Sense Validation in World Coordinates
+                clean_cname = class_name.lower().strip()
+                if "security_camera" in clean_cname and wz < 1.80:
+                    stats["rejected_spatial_camera"] = stats.get("rejected_spatial_camera", 0) + 1
+                    LOG.debug("      %-18s dropped: failed spatial common sense (wz=%.2fm < 1.80m, security cameras must be near ceiling)",
+                              class_name, wz)
+                    continue
+
+                if clean_cname in ("spillage", "spill") and wz > 0.15:
+                    stats["rejected_spatial_spillage"] = stats.get("rejected_spatial_spillage", 0) + 1
+                    LOG.debug("      %-18s dropped: failed spatial common sense (wz=%.2fm > 0.15m, spillage must rest on floor)",
+                              class_name, wz)
+                    continue
+
+                if "hazmat" in clean_cname and (wz < 0.60 or wz > 2.40):
+                    stats["rejected_spatial_hazmat"] = stats.get("rejected_spatial_hazmat", 0) + 1
+                    LOG.debug("      %-18s dropped: failed spatial common sense (wz=%.2fm outside [0.60, 2.40]m, hazmat signs must be wall-mounted)",
+                              class_name, wz)
+                    continue
 
                 LOG.debug("      %-18s conf=%.2f d=%.2fm cam=(%.2f,%.2f,%.2f) -> world[%s]=(%.3f,%.3f,%.3f)",
                           class_name, float(conf or 0), z_m, cx, cy, cz, world_frame, wx, wy, wz)
