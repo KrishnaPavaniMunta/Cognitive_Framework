@@ -29,6 +29,11 @@ EXTENSION_CLASSES = {
     "medical_tray": ("MedicalDevice", "Steel/plastic instrument tray (semantic-map-bridge extension class)."),
     "waste_bin": ("Infrastructure", "General/yellow/tiger-stripe hospital waste bin (semantic-map-bridge extension class)."),
     "floor": ("SpatialContext", "Navigable ground surface / floor space (semantic-map-bridge extension class)."),
+    "sign_fire_extinguisher": ("Infrastructure", "Hospital fire extinguisher identification safety sign."),
+    "sign_radiation": ("SpatialContext", "Hospital radiation hazard warning sign."),
+    "sign_caution_wet_floor": ("SpatialContext", "Hospital slippery/wet floor caution safety sign."),
+    "sign_prohibition_access": ("SpatialContext", "Hospital restricted access or staff only sign."),
+    "hazmat_sign": ("SpatialContext", "Hospital biohazard or chemical hazard warning sign."),
 }
 
 

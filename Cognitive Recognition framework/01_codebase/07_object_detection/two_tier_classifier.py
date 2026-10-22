@@ -203,15 +203,8 @@ class TwoTierCognitionEngine:
                     all_scores=scores,
                 )
 
-        # Fallback: Tag as unidentified obstacle for safe path planning
-        return ClassificationResult(
-            class_name="unidentified_obstacle",
-            confidence=max(0.40, best_sim),
-            tier="tier2_obstacle",
-            is_novel=True,
-            ontology_uri=f"{UO}Obstacle",
-            all_scores=scores,
-        )
+        # Fallback: No confident asset identified - do not emit unidentified obstacle
+        return None
 
     def _query_vlm(self, crop_bgr: np.ndarray) -> tuple[str, float] | None:
         """

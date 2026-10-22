@@ -26,7 +26,7 @@ import numpy as np
 MOVABLE_OBSTACLE_CLASSES = {
     "chair", "hospital_stretcher", "utility_trolley", "bin", "general_bin",
     "yellow_bin", "bin_tiger_stripe", "suitcase", "medical_tray", "dining table",
-    "bench_hosp", "box", "bed", "wheelchair", "unidentified_obstacle", "obstacle",
+    "bench_hosp", "box", "bed", "wheelchair",
     "item", "thing",
 }
 

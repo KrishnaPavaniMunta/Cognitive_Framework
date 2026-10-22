@@ -85,6 +85,16 @@ def class_color(class_name: str) -> list[int]:
 
     if "spill" in name_lower:
         return [255, 20, 147]  # Vivid deep pink for spillages
+    if "exit" in name_lower:
+        return [34, 197, 94]   # Vivid Green for Emergency Exit
+    if "fire" in name_lower or "extinguisher" in name_lower:
+        return [239, 68, 68]   # Vivid Red for Fire Safety Equipment
+    if "hazmat" in name_lower or "radiation" in name_lower or "biohazard" in name_lower:
+        return [245, 158, 11]  # Amber/Yellow for Biohazard & Radiation
+    if "wet_floor" in name_lower or "caution" in name_lower:
+        return [234, 179, 8]   # Warning Yellow for Wet Floor
+    if "prohibition" in name_lower or "restricted" in name_lower:
+        return [220, 38, 38]   # Red for Restricted / No Entry
     h = abs(hash(class_name))
     return [80 + (h & 0x7F), 80 + ((h >> 8) & 0x7F), 80 + ((h >> 16) & 0x7F)]
 

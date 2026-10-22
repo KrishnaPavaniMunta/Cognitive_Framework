@@ -364,6 +364,8 @@ class SemanticMapDB:
         rows = self.conn.execute(f"SELECT {select_cols} FROM semantic_map").fetchall()
         for row in rows:
             lid, class_name, instance_id, world_frame, x, y, z, hits, mean_conf, max_conf, first_ns, last_ns = row[:12]
+            if "unidentified" in str(class_name).lower() or str(class_name).lower() == "obstacle":
+                continue
             record = {
                 "class_name": class_name,
                 "instance_id": int(instance_id),
@@ -462,6 +464,9 @@ class SemanticMapDB:
 
     def add_observation(self, record: dict[str, Any]) -> tuple[int | None, int | None]:
         """Merge into the nearest same-class landmark within the radius, else create a new one."""
+        cname_check = str(record.get("class_name", "")).lower()
+        if "unidentified" in cname_check or cname_check == "obstacle":
+            return None, None
         landmark_id = None
         if record["world_X"] is not None:
             landmark_id = self._merge(record)
@@ -819,11 +824,12 @@ def annotate(frame: np.ndarray, frame_index: int, timestamp_ns: int, pins: list[
         cv2.circle(img, (int(pin["u"]), int(pin["v"])), 4, (0, 0, 255), -1)
 
         is_floor = pin["class_name"].strip().lower() in ("floor", "navigable_floor")
+        instance_label = f" {pin['instance_id']}" if pin.get("instance_id") is not None else ""
+        badge_prefix = f"{pin['display_badge']} " if pin.get("display_badge") else ""
         if is_floor:
             head = f"Floor {float(pin['confidence'] or 0):.0%}"
         else:
-            instance_label = f" {pin['instance_id']}" if pin.get("instance_id") is not None else ""
-            head = f"{pin['class_name']}{instance_label} {float(pin['confidence'] or 0):.0%}"
+            head = f"{badge_prefix}{pin['class_name']}{instance_label} {float(pin['confidence'] or 0):.0%}"
         body = (
             f"W({pin['world_X']:.2f},{pin['world_Y']:.2f},{pin['world_Z']:.2f}) d={pin['depth_m']:.2f}m"
             if ok else f"NO 3D: {pin['reject_reason']}"
@@ -936,12 +942,18 @@ def parse_args() -> argparse.Namespace:
                    help="Use raw depth instead of edge-preserving bilateral smoothing")
     p.add_argument("--ontology", default=str(DEFAULT_ONTOLOGY),
                    help="RDF/OWL ontology embedded as landmark metadata in Rerun")
-    p.add_argument("--enable-residual-discovery", action="store_true", default=True,
+    p.add_argument("--enable-residual-discovery", action="store_true", default=False,
                    help="Run residual 3D DBSCAN clustering and two-tier cognition on keyframes")
     p.add_argument("--no-residual-discovery", action="store_false", dest="enable_residual_discovery",
                    help="Disable residual 3D clustering")
     p.add_argument("--residual-interval", type=int, default=35,
                    help="Run residual clustering every Nth processed frame (default: 35)")
+    p.add_argument("--enable-sign-detection", action="store_true", default=True,
+                   help="Enable OCR + CLIP multimodal safety signage detector")
+    p.add_argument("--no-sign-detection", action="store_false", dest="enable_sign_detection",
+                   help="Disable multimodal sign detector")
+    p.add_argument("--sign-cadence", type=int, default=20,
+                   help="Cadence in frames for periodic full-scene text sweep (default: 20)")
     p.add_argument("--verbose", action="store_true", help="Print DEBUG lines to the console too")
     args = p.parse_args()
     if args.rerun_only:
@@ -1153,6 +1165,22 @@ def main() -> None:
             LOG.info("[DISCOVERY] Two-Tier Residual Cognition active (interval: %d frames)", args.residual_interval)
         except Exception as exc:
             LOG.warning("[DISCOVERY] Could not initialize residual cognition: %s", exc)
+
+    sign_detector = None
+    if getattr(args, "enable_sign_detection", True) and not args.rerun_only:
+        try:
+            from multimodal_sign_detector import MultimodalSignDetector
+            clip_m = getattr(cognition_engine, "clip_model", None)
+            clip_p = getattr(cognition_engine, "clip_processor", None)
+            sign_detector = MultimodalSignDetector(
+                use_gpu=(args.detector_device == "cuda"),
+                clip_model=clip_m,
+                clip_processor=clip_p,
+                device=args.detector_device,
+            )
+            LOG.info("[SIGN DETECTOR] Multimodal Sign Detector active (cadence: %d frames)", args.sign_cadence)
+        except Exception as exc:
+            LOG.warning("[SIGN DETECTOR] Could not initialize Multimodal Sign Detector: %s", exc)
     depth_ts = [m.timestamp_ns for m in depth_messages]
     cam_ts = [m.timestamp_ns for m in caminfo_messages]
 
@@ -1311,6 +1339,30 @@ def main() -> None:
             else:
                 detector.use_dino = dino_enabled and (processed_counter % max(1, args.dino_interval) == 0)
                 detections = detector.infer(rgb_img, depth_mm, intr)
+
+            # Step 1.2: Multimodal Hospital Safety Signage Detection (OCR + CLIP Dual-Trigger)
+            if sign_detector is not None:
+                try:
+                    sign_results = sign_detector.detect_signs_in_frame(
+                        frame_index=processed_counter,
+                        rgb_bgr=rgb_img,
+                        detections=detections,
+                        depth_mm=depth_mm,
+                        intrinsics=intr,
+                        pose_matrix=pose_matrix,
+                        cadence=args.sign_cadence,
+                    )
+                    for s in sign_results:
+                        detections.append({
+                            "bbox_xyxy": s.bbox_xyxy,
+                            "class_label": s.canonical_name,
+                            "confidence": s.confidence,
+                            "source": f"sign_{s.modality}",
+                            "display_badge": s.badge_label,
+                        })
+                except Exception as exc:
+                    LOG.warning("[SIGN DETECTOR] Sign detection error at frame %d: %s", processed_counter, exc)
+
             stats["detections_total"] += len(detections)
             processed_counter += 1
             stats["processed_frames"] += 1
@@ -1363,6 +1415,7 @@ def main() -> None:
                     "mask": raw_mask,
                     "eroded_mask": eroded_mask,
                     "surface_points": None,
+                    "display_badge": det.get("display_badge"),
                 }
 
                 if class_name in excluded_classes:
@@ -1400,7 +1453,8 @@ def main() -> None:
                     # Step 3: Physical 3D Geometric Gatekeeper directly from Ontology
                     # Checks measured (rw, rd, rh) against limits loaded from ontology.rdf
                     # Chairs are exempt from physical dimension gating (variable orientations, occlusions, side views)
-                    if class_name in ontology_limits and class_name != "chair":
+                    sign_classes = {"exit_sign", "sign_fire_extinguisher", "hazmat_sign", "sign_radiation", "sign_caution_wet_floor", "sign_prohibition_access"}
+                    if class_name in ontology_limits and class_name != "chair" and class_name not in sign_classes:
                         lim = ontology_limits[class_name]
                         rw, rd, rh = dims_3d
                         w_ok = lim["min_w"] <= rw <= lim["max_w"]
@@ -1498,7 +1552,9 @@ def main() -> None:
                     )
                     for cluster in res_clusters:
                         c_res = cognition_engine.classify_crop(cluster.crop_rgb)
-                        if c_res.is_novel and c_res.class_name != "unidentified_obstacle":
+                        if not c_res or "unidentified" in str(c_res.class_name).lower() or str(c_res.class_name).lower() == "obstacle":
+                            continue
+                        if c_res.is_novel:
                             cognition_engine.ingest_novel_concept(c_res.class_name, dimensions_m=cluster.dimensions_m)
 
                         c_pin = {
