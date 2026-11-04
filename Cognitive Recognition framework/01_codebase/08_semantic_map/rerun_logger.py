@@ -371,6 +371,9 @@ class RerunSceneLogger:
         self.floor_z_sum: float = 0.0
         self.floor_z_count: int = 0
         self._zone_logged: bool = False
+        self.lidar_chunks: int = 0
+        self.lidar_points_logged: int = 0
+        self.lidar_wall_points_xy: list[np.ndarray] = []
 
         rr.init(application_id, spawn=spawn_viewer)
         recording_path.parent.mkdir(parents=True, exist_ok=True)
@@ -615,6 +618,40 @@ class RerunSceneLogger:
         self.cloud_chunks += 1
         self.points_logged += int(points_world.shape[0])
 
+    def log_lidar_scan(
+        self,
+        frame_index: int,
+        timestamp_ns: int,
+        points_world: np.ndarray,
+        log_perimeter_chunk: bool = False,
+    ) -> None:
+        """Logs instantaneous 2D LiDAR planar scan and accumulates room perimeter wall points."""
+        if points_world is None or len(points_world) == 0:
+            return
+        self._set_time(frame_index, timestamp_ns)
+        # Log active instantaneous 360-degree laser scan around the robot
+        rr.log(
+            "world/lidar/scan",
+            rr.Points3D(
+                points_world.astype(np.float32),
+                colors=[0, 230, 230],
+                radii=self.cloud_point_radius_m * 1.5,
+            ),
+        )
+        if log_perimeter_chunk:
+            rr.log(
+                f"world/lidar/perimeter_chunk_{self.lidar_chunks:05d}",
+                rr.Points3D(
+                    points_world.astype(np.float32),
+                    colors=[0, 190, 210],
+                    radii=self.cloud_point_radius_m,
+                ),
+                static=True,
+            )
+            self.lidar_chunks += 1
+            self.lidar_points_logged += len(points_world)
+            self.lidar_wall_points_xy.append(points_world[:, :2].astype(np.float32))
+
     def log_navigable_zone(self, grid_res_m: float = 0.15) -> dict | None:
         """Publishes the discovered navigable floor zone as a 3D boundary and bounding box in Rerun."""
         if self._zone_logged or not self.floor_points_xy:
@@ -643,6 +680,7 @@ class RerunSceneLogger:
 
         # 2D Convex hull of the navigable footprint
         hull_pts_2d = None
+        lidar_perimeter_pts = None
         if len(filtered_xy) >= 3:
             hull = cv2.convexHull(filtered_xy.astype(np.float32))
             if hull is not None and len(hull) >= 3:
@@ -650,6 +688,27 @@ class RerunSceneLogger:
                 # Close the polygon loop
                 hull_closed = np.vstack([hull_pts_2d, hull_pts_2d[0]])
                 hull_3d = np.column_stack([hull_closed, np.full(len(hull_closed), elevation_z, dtype=np.float32)])
+                if self.lidar_wall_points_xy:
+                    all_lidar_xy = np.vstack(self.lidar_wall_points_xy)
+                    if len(all_lidar_xy) >= 20:
+                        grid_c = np.round(all_lidar_xy / 0.10).astype(np.int64)
+                        _, u_idx = np.unique(grid_c, axis=0, return_index=True)
+                        filt_lidar = all_lidar_xy[u_idx]
+                        if len(filt_lidar) > 3000:
+                            sub_idx = np.linspace(0, len(filt_lidar) - 1, 3000, dtype=int)
+                            lidar_perimeter_pts = filt_lidar[sub_idx].tolist()
+                        else:
+                            lidar_perimeter_pts = filt_lidar.tolist()
+                        lidar_pts_3d = np.column_stack([filt_lidar, np.full(len(filt_lidar), elevation_z + 0.38, dtype=np.float32)])
+                        rr.log(
+                            "world/lidar/perimeter_points",
+                            rr.Points3D(
+                                lidar_pts_3d.astype(np.float32),
+                                colors=[0, 190, 220],
+                                radii=self.cloud_point_radius_m * 1.2,
+                            ),
+                            static=True,
+                        )
                 rr.log(
                     "world/zones/navigable_boundary",
                     rr.LineStrips3D([hull_3d], colors=[[100, 180, 140]], radii=0.035, labels=["Floor"]),
@@ -679,6 +738,7 @@ class RerunSceneLogger:
             "area_m2": area_m2,
             "point_count": int(self.floor_z_count),
             "polygon": hull_pts_2d.tolist() if hull_pts_2d is not None else [[min_x, min_y], [max_x, min_y], [max_x, max_y], [min_x, max_y]],
+            "lidar_perimeter": lidar_perimeter_pts,
         }
         return zone_info
 

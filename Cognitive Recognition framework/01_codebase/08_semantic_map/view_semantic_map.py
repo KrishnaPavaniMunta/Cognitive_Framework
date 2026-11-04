@@ -127,9 +127,13 @@ def load_navigable_zones(conn: sqlite3.Connection) -> list[dict]:
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     if "navigable_zones" not in tables:
         return []
-    rows = conn.execute(
-        "SELECT zone_id, zone_name, world_frame, min_x, max_x, min_y, max_y, elevation_z, area_m2, point_count, polygon_json FROM navigable_zones"
-    ).fetchall()
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(navigable_zones)").fetchall()}
+    has_lidar = "lidar_perimeter_json" in cols
+    query = "SELECT zone_id, zone_name, world_frame, min_x, max_x, min_y, max_y, elevation_z, area_m2, point_count, polygon_json"
+    if has_lidar:
+        query += ", lidar_perimeter_json"
+    query += " FROM navigable_zones"
+    rows = conn.execute(query).fetchall()
     zones = []
     for r in rows:
         poly = []
@@ -138,11 +142,18 @@ def load_navigable_zones(conn: sqlite3.Connection) -> list[dict]:
                 poly = json.loads(r[10])
             except Exception:
                 pass
+        lidar_pts = []
+        if has_lidar and len(r) > 11 and r[11]:
+            try:
+                lidar_pts = json.loads(r[11])
+            except Exception:
+                pass
         zones.append({
             "zone_id": r[0], "zone_name": r[1], "world_frame": r[2],
             "min_x": r[3], "max_x": r[4], "min_y": r[5], "max_y": r[6],
             "elevation_z": r[7], "area_m2": r[8], "point_count": r[9],
             "polygon": poly,
+            "lidar_perimeter": lidar_pts,
         })
     return zones
 

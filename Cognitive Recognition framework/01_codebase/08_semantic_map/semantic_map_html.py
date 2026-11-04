@@ -89,7 +89,7 @@ def build_figure(
         if obj_name in lm_by_label:
             lm_by_label[obj_name].setdefault("violations", []).append(v)
 
-    # 1. Render discovered navigable floor zone
+    # 1. Render discovered navigable floor zone & LiDAR perimeter
     for zone in navigable_zones or []:
         poly = zone.get("polygon") or []
         elev_z = float(zone.get("elevation_z", 0.0))
@@ -106,6 +106,20 @@ def build_figure(
                     name="Floor (boundary)",
                     line={"color": "#4fb3a5", "width": 4},
                     hovertemplate=f"<b>Floor</b><br>Navigable Zone<br>Area: {area:.1f} m²<extra></extra>",
+                )
+            )
+        lidar_pts = zone.get("lidar_perimeter") or []
+        if lidar_pts and len(lidar_pts) >= 5:
+            lx = [p[0] for p in lidar_pts]
+            ly = [p[1] for p in lidar_pts]
+            lz = [elev_z + 0.38 for _ in lidar_pts]
+            figure.add_trace(
+                go.Scatter3d(
+                    x=lx, y=ly, z=lz,
+                    mode="markers",
+                    name="LiDAR Perimeter Walls",
+                    marker={"size": 1.8, "color": "#00d2d3", "opacity": 0.40},
+                    hovertemplate="<b>LiDAR Wall Point</b><br>X: %{x:.2f}m<br>Y: %{y:.2f}m<br>Z: %{z:.2f}m<extra></extra>",
                 )
             )
 

@@ -182,6 +182,23 @@ def sample_box_foreground_depth_m(
 
 
 # ── Step 3: de-projection ─────────────────────────────────────────────────────
+def project_laserscan_to_world(scan_msg: Any, pose_matrix: np.ndarray, max_range_m: float = 25.0) -> np.ndarray:
+    """Project 2D planar LaserScan ranges into 3D world coordinates using sensor pose."""
+    angles = scan_msg.angle_min + np.arange(len(scan_msg.ranges)) * scan_msg.angle_increment
+    ranges = np.array(scan_msg.ranges, dtype=np.float32)
+    valid = (ranges >= max(0.1, scan_msg.range_min)) & (ranges <= min(max_range_m, scan_msg.range_max)) & np.isfinite(ranges)
+    if not np.any(valid):
+        return np.empty((0, 3), dtype=np.float32)
+    r_val = ranges[valid]
+    a_val = angles[valid]
+    xs = r_val * np.cos(a_val)
+    ys = r_val * np.sin(a_val)
+    zs = np.zeros_like(xs)
+    pts_laser = np.stack([xs, ys, zs, np.ones_like(xs)], axis=0)
+    pts_world = (np.asarray(pose_matrix, dtype=np.float64) @ pts_laser)[:3].T
+    return pts_world.astype(np.float32)
+
+
 def deproject(u: float, v: float, z_m: float, intr: capture.CameraIntrinsics) -> tuple[float, float, float]:
     x = (float(u) - intr.cx) * z_m / intr.fx
     y = (float(v) - intr.cy) * z_m / intr.fy
@@ -306,10 +323,15 @@ class SemanticMapDB:
                 area_m2       REAL NOT NULL,
                 point_count   INTEGER NOT NULL,
                 polygon_json  TEXT,
+                lidar_perimeter_json TEXT,
                 created_utc   TEXT NOT NULL
             );
             """
         )
+        zone_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(navigable_zones)")}
+        if "lidar_perimeter_json" not in zone_cols:
+            self.conn.execute("ALTER TABLE navigable_zones ADD COLUMN lidar_perimeter_json TEXT")
+
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(semantic_map)")}
         if "instance_id" not in columns:
             self.conn.execute("ALTER TABLE semantic_map ADD COLUMN instance_id INTEGER NOT NULL DEFAULT 0")
@@ -347,6 +369,10 @@ class SemanticMapDB:
         self.conn.commit()
 
     def _load_landmarks(self) -> None:
+        zone_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(navigable_zones)")}
+        if "lidar_perimeter_json" not in zone_cols:
+            self.conn.execute("ALTER TABLE navigable_zones ADD COLUMN lidar_perimeter_json TEXT")
+
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(semantic_map)")}
         has_measured = "measured_width" in columns
         has_consensus = "class_votes_json" in columns
@@ -442,12 +468,13 @@ class SemanticMapDB:
         )
 
     def save_navigable_zone(self, zone_info: dict, world_frame: str) -> None:
+        lidar_json = json.dumps(zone_info["lidar_perimeter"]) if zone_info.get("lidar_perimeter") else None
         self.conn.execute(
             """
             INSERT INTO navigable_zones (
                 zone_name, world_frame, min_x, max_x, min_y, max_y,
-                elevation_z, area_m2, point_count, polygon_json, created_utc
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                elevation_z, area_m2, point_count, polygon_json, lidar_perimeter_json, created_utc
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 zone_info.get("zone_name", "Floor"),
@@ -457,6 +484,7 @@ class SemanticMapDB:
                 float(zone_info["elevation_z"]), float(zone_info["area_m2"]),
                 int(zone_info.get("point_count", 0)),
                 json.dumps(zone_info.get("polygon", [])),
+                lidar_json,
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
@@ -952,6 +980,12 @@ def parse_args() -> argparse.Namespace:
                    help="Enable OCR + CLIP multimodal safety signage detector")
     p.add_argument("--no-sign-detection", action="store_false", dest="enable_sign_detection",
                    help="Disable multimodal sign detector")
+    p.add_argument("--scan-topic", default="/scan",
+                   help="2D LiDAR laser scan topic (optional, default: /scan)")
+    p.add_argument("--enable-lidar", action="store_true", default=True,
+                   help="Ingest and project 2D LiDAR scans if present")
+    p.add_argument("--no-lidar", action="store_false", dest="enable_lidar",
+                   help="Disable 2D LiDAR ingestion")
     p.add_argument("--sign-cadence", type=int, default=20,
                    help="Cadence in frames for periodic full-scene text sweep (default: 20)")
     p.add_argument("--verbose", action="store_true", help="Print DEBUG lines to the console too")
@@ -1101,6 +1135,9 @@ def main() -> None:
 
         selected = {args.rgb_topic, args.depth_topic, args.camera_info_topic,
                     args.tf_topic, args.tf_static_topic, args.odom_topic}
+        scan_topic = getattr(args, "scan_topic", "/scan")
+        if getattr(args, "enable_lidar", True) and scan_topic in available_topics:
+            selected.add(scan_topic)
         topic_messages, skipped = capture._topic_message_map(reader, selected)
 
     rgb_messages = topic_messages.get(args.rgb_topic, [])
@@ -1109,6 +1146,7 @@ def main() -> None:
     tf_messages = topic_messages.get(args.tf_topic, [])
     tf_static_messages = topic_messages.get(args.tf_static_topic, [])
     odom_messages = topic_messages.get(args.odom_topic, [])
+    scan_messages = topic_messages.get(scan_topic, []) if getattr(args, "enable_lidar", True) else []
 
     LOG.info("[BAG] rgb=%d depth=%d camera_info=%d tf=%d tf_static=%d odom=%d (deserialize errors=%d)",
              len(rgb_messages), len(depth_messages), len(caminfo_messages),
@@ -1181,8 +1219,11 @@ def main() -> None:
             LOG.info("[SIGN DETECTOR] Multimodal Sign Detector active (cadence: %d frames)", args.sign_cadence)
         except Exception as exc:
             LOG.warning("[SIGN DETECTOR] Could not initialize Multimodal Sign Detector: %s", exc)
+    if scan_messages:
+        LOG.info("[LIDAR] 2D LiDAR active: %d messages on topic '%s'", len(scan_messages), scan_topic)
     depth_ts = [m.timestamp_ns for m in depth_messages]
     cam_ts = [m.timestamp_ns for m in caminfo_messages]
+    scan_ts = [m.timestamp_ns for m in scan_messages]
 
     db_path = run_dir / "world_map.db"
     if args.reset_map and db_path.exists():
@@ -1248,7 +1289,8 @@ def main() -> None:
     dino_enabled = not args.disable_dino
     chain_logged = False
 
-    depth_cursor = cam_cursor = 0
+    depth_cursor = cam_cursor = scan_cursor = 0
+    max_scan_delta_ns = int(args.max_rgb_depth_delta_ms * 2 * 1e6)
     matched_counter = processed_counter = 0
     interrupted = False
 
@@ -1613,6 +1655,17 @@ def main() -> None:
                     scene.log_frame(processed_counter, rgb_item.timestamp_ns,
                                     rgb_img, depth_mm, intr, pose_matrix, detections=pins,
                                     annotated_frame=annotated)
+                    if scan_messages:
+                        scan_idx = capture._closest_index(scan_ts, rgb_item.timestamp_ns, start_idx=scan_cursor)
+                        if scan_idx >= 0 and abs(scan_messages[scan_idx].timestamp_ns - rgb_item.timestamp_ns) <= max_scan_delta_ns:
+                            scan_cursor = max(scan_cursor, scan_idx)
+                            scan_item = scan_messages[scan_idx]
+                            laser_frame = getattr(getattr(scan_item.message, "header", None), "frame_id", "velodyne") or "velodyne"
+                            laser_pose, _ = tf_tree.lookup(laser_frame, args.world_frame, scan_item.timestamp_ns)
+                            if laser_pose is not None:
+                                pts_laser_world = project_laserscan_to_world(scan_item.message, laser_pose)
+                                log_chunk = (processed_counter % max(1, args.rerun_cloud_every) == 0)
+                                scene.log_lidar_scan(processed_counter, rgb_item.timestamp_ns, pts_laser_world, log_perimeter_chunk=log_chunk)
 
             if not args.no_video and preview_cap is None:
                 if writer is None:
