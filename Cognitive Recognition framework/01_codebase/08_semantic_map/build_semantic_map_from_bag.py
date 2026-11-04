@@ -543,7 +543,7 @@ class SemanticMapDB:
             "radiator": 0.75,
             "spillage": 0.70,
             "hazmat_sign": 0.60,
-            "exit_sign": 0.80,
+            "exit_sign": 1.30,
         }
         base_radius = class_base_radii.get(det_class, self.merge_radius_m)
         det_extent = max(rw or 0.45, rd or 0.45, 0.40)
@@ -719,7 +719,7 @@ class SemanticMapDB:
                     "radiator": 0.75,
                     "spillage": 0.70,
                     "hazmat_sign": 0.60,
-                    "exit_sign": 0.80,
+                    "exit_sign": 1.30,
                 }
                 base_radius = class_base_radii.get(lm1["class_name"], self.merge_radius_m)
                 extent1 = max(lm1.get("measured_width") or 0.45, lm1.get("measured_depth") or 0.45, 0.40)

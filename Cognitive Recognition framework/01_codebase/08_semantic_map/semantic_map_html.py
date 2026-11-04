@@ -225,18 +225,22 @@ def build_figure(
                 cz_pts.append(None)
 
         if cx_pts:
+            parent_cls = str(dz.get("parent_class", "door")).lower()
+            parent_inst = dz.get("parent_instance") or did
+            cls_title = "Exit Sign" if "exit" in parent_cls else "Door"
+            zone_title = f"{cls_title} {parent_inst} Egress Zone"
             figure.add_trace(
                 go.Scatter3d(
                     x=cx_pts,
                     y=cy_pts,
                     z=cz_pts,
                     mode="lines",
-                    name=f"Fire Door {did} Zone ({status})",
+                    name=f"{zone_title} ({status})",
                     line={"color": color, "width": 4},
                     hovertemplate=(
-                        f"<b>Emergency Fire Exit Door {did}</b><br>"
+                        f"<b>{zone_title}</b><br>"
                         f"Keep-Clear Zone: <b>{status}</b><br>"
-                        f"Radius: {dz.get('radius_m', 1.0):.1f}m | Door Width: {dz.get('width_m', 0.85):.2f}m<br>"
+                        f"Radius: {dz.get('radius_m', 1.0):.1f}m | Width: {dz.get('width_m', 0.85):.2f}m<br>"
                         f"Height Range: {dz.get('z_bounds', [0, 1.8])[0]:.2f}m to {dz.get('z_bounds', [0, 1.8])[1]:.2f}m<extra></extra>"
                     ),
                     showlegend=True,

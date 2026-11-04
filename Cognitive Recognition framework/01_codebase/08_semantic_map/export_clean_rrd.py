@@ -261,13 +261,16 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
                     strips_list.append(np.asarray([tuple(p) for p in back_wall], dtype=np.float32))
 
                 if strips_list:
+                    parent_cls = str(dz.get("parent_class", "door")).lower()
+                    parent_inst = dz.get("parent_instance") or did
+                    cls_title = "Exit Sign" if "exit" in parent_cls else "Door"
                     rr.log(
                         f"world/door_zones/fire_exit_door_{did}_zone",
                         rr.LineStrips3D(
                             strips_list,
                             colors=[zone_color] * len(strips_list),
                             radii=0.022,
-                            labels=[f"Fire Exit Door {did} 3D Zone [{status_label}] (r={dz.get('radius_m', 1.0)}m, h={dz.get('height_m', 2.0)}m)"],
+                            labels=[f"{cls_title} {parent_inst} 3D Egress Zone [{status_label}] (r={dz.get('radius_m', 1.0)}m, h={dz.get('height_m', 2.0)}m)"],
                         ),
                         static=True,
                     )

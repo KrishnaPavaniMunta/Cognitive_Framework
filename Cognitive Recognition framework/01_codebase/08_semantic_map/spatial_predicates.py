@@ -177,6 +177,8 @@ class BoundingBox3D:
 class DoorKeepClearZone3D:
     door_id: int
     center: tuple[float, float, float]       # (xd, yd, zd) door center in world frame
+    parent_class: str = "door"
+    parent_instance: int = 1
     width: float = 0.90                      # door opening width
     height: float = 2.00                     # door opening height
     radius: float = 1.00                     # keep-clear egress radius (default 1.0m, or 1.2m)
@@ -723,6 +725,8 @@ class SpatialSceneGraph:
             self.door_zones[node.node_id] = DoorKeepClearZone3D(
                 door_id=node.node_id,
                 center=(cx, cy, cz),
+                parent_class=node.class_name,
+                parent_instance=node.instance_id,
                 width=max(0.75, rw),
                 height=max(1.80, rh),
                 radius=1.00,  # Andrea's fire door rule: 1.0m keep-clear arc
@@ -764,6 +768,8 @@ class SpatialSceneGraph:
             self.door_zones[sign.node_id] = DoorKeepClearZone3D(
                 door_id=sign.node_id,
                 center=(sx, sy, self.floor_elevation_z + 1.05),
+                parent_class=sign.class_name,
+                parent_instance=sign.instance_id,
                 width=1.00,
                 height=2.10,
                 radius=1.00,
@@ -872,11 +878,11 @@ class SpatialSceneGraph:
 
                 # ── 2. Functional Safety & Emergency Exit Obstruction ────────
                 # Check A blocking emergency fire door B or exit sign egress
-                if ("door" in cls_b or "exit_sign" in cls_b or "fire_exit" in cls_b) and node_a.is_movable:
+                if ("door" in cls_b or "exit_sign" in cls_b or "fire_exit" in cls_b) and node_a.is_movable and node_a.hit_count >= 4:
                     dzone = self.door_zones.get(id_b)
                     if dzone is not None:
                         blocked, pen_m, def_m = dzone.intersects_box(box_a)
-                        if blocked:
+                        if blocked and pen_m > 0.02:
                             dzone.is_obstructed = True
                             dzone.status = "OBSTRUCTED"
                             dzone.color_hex = "#e74c3c"
@@ -898,11 +904,11 @@ class SpatialSceneGraph:
                             ))
 
                 # Check B blocking emergency fire door A or exit sign egress
-                if ("door" in cls_a or "exit_sign" in cls_a or "fire_exit" in cls_a) and node_b.is_movable:
+                if ("door" in cls_a or "exit_sign" in cls_a or "fire_exit" in cls_a) and node_b.is_movable and node_b.hit_count >= 4:
                     dzone = self.door_zones.get(id_a)
                     if dzone is not None:
                         blocked, pen_m, def_m = dzone.intersects_box(box_b)
-                        if blocked:
+                        if blocked and pen_m > 0.02:
                             dzone.is_obstructed = True
                             dzone.status = "OBSTRUCTED"
                             dzone.color_hex = "#e74c3c"
@@ -1072,6 +1078,8 @@ class SpatialSceneGraph:
             "door_keep_clear_zones": [
                 {
                     "door_id": dz.door_id,
+                    "parent_class": dz.parent_class,
+                    "parent_instance": dz.parent_instance,
                     "center": [round(c, 3) for c in dz.center],
                     "width_m": round(dz.width, 3),
                     "height_m": round(dz.height, 3),

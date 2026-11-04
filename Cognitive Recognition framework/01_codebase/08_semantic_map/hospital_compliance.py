@@ -181,6 +181,12 @@ class HospitalComplianceEvaluator:
                 if not node_obs or not node_obs.is_movable:
                     continue
 
+                # Multi-perspective temporal consistency: require at least 4 observation hits for movable obstacles
+                # (Prevents transient false detections or objects that moved away from falsely blocking exits)
+                hit_count = int(lm.get("hit_count") or node_obs.hit_count or 1)
+                if hit_count < 4:
+                    continue
+
                 box = node_obs.bbox
 
                 # Use 3D keep-clear half-cylinder egress zone check
@@ -193,16 +199,21 @@ class HospitalComplianceEvaluator:
                     try:
                         pts = np.asarray(json.loads(surf_raw), dtype=np.float32)
                         pts_int, pts_penetrating, _ = dzone.intersects_points(pts)
-                        intersects = intersects or pts_int
                     except Exception:
                         pass
 
-                if intersects:
+                dist_to_door = round(box.distance_to(door_box), 2)
+                # Meaningful physical obstruction: either box penetrates with > 0.02m intrusion,
+                # OR a dense cluster of surface points (>= 15 pts) penetrates AND obstacle is within 1.25m
+                points_obstruction = pts_penetrating >= 15 and dist_to_door <= (dzone.radius + 0.25)
+                is_real_obstruction = (intersects and intrusion_m > 0.02) or points_obstruction
+
+                if is_real_obstruction:
                     obstructing.append({
                         "obstacle_id": oid,
                         "obstacle_class": lm["class_name"],
                         "obstacle_instance": lm.get("instance_id"),
-                        "distance_m": round(box.distance_to(door_box), 2),
+                        "distance_m": dist_to_door,
                         "intrusion_depth_m": round(intrusion_m, 2),
                         "clear_width_deficit_m": round(deficit_m, 2),
                         "surface_points_penetrating": pts_penetrating,
