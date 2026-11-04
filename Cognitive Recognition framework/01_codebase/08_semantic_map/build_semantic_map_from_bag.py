@@ -102,6 +102,7 @@ def sample_box_foreground_depth_m(
     v: float,
     half: int = DEPTH_PATCH_HALF,
     mask: np.ndarray | None = None,
+    class_label: str = "",
 ) -> tuple[float | None, float, float]:
     """
     Valid-depth masking for 3D depth association:
@@ -150,7 +151,11 @@ def sample_box_foreground_depth_m(
     inner_x1 = max(0, int(bx1 + 0.10 * bw))
     inner_x2 = min(w_img, int(bx2 - 0.10 * bw))
     inner_y1 = max(0, int(by1 + 0.10 * bh))
-    inner_y2 = min(h_img, int(by2 - 0.05 * bh))
+    # If the object is a door, sample exclusively from upper 40% (lintel/casing) to bypass foreground obstacles
+    if "door" in str(class_label).lower():
+        inner_y2 = min(h_img, int(by1 + 0.40 * bh))
+    else:
+        inner_y2 = min(h_img, int(by2 - 0.05 * bh))
     if inner_x2 <= inner_x1 or inner_y2 <= inner_y1:
         inner_x1, inner_x2 = bx1, bx2
         inner_y1, inner_y2 = by1, by2
@@ -529,9 +534,20 @@ class SemanticMapDB:
         rd = record.get("real_depth")
         rh = record.get("real_height")
 
-        # Dynamic physical footprint calculated directly from the detected dimensions
+        # Class-specific merge radius baselines
+        class_base_radii = {
+            "door": 1.30,
+            "dining table": 1.20,
+            "bed": 1.30,
+            "chair": 0.60,
+            "radiator": 0.75,
+            "spillage": 0.70,
+            "hazmat_sign": 0.60,
+            "exit_sign": 0.80,
+        }
+        base_radius = class_base_radii.get(det_class, self.merge_radius_m)
         det_extent = max(rw or 0.45, rd or 0.45, 0.40)
-        det_radius_xy = max(self.merge_radius_m, det_extent * 0.70)
+        det_radius_xy = max(base_radius, det_extent * 0.70)
         det_height = max(rh or 0.70, 0.70)
 
         # 1. Search for existing landmarks:
@@ -695,9 +711,20 @@ class SemanticMapDB:
                 dist_xy = math.dist((lm1["X"], lm1["Y"]), (lm2["X"], lm2["Y"]))
                 dist_z = abs(lm1["Z"] - lm2["Z"])
 
+                class_base_radii = {
+                    "door": 1.30,
+                    "dining table": 1.20,
+                    "bed": 1.30,
+                    "chair": 0.60,
+                    "radiator": 0.75,
+                    "spillage": 0.70,
+                    "hazmat_sign": 0.60,
+                    "exit_sign": 0.80,
+                }
+                base_radius = class_base_radii.get(lm1["class_name"], self.merge_radius_m)
                 extent1 = max(lm1.get("measured_width") or 0.45, lm1.get("measured_depth") or 0.45, 0.40)
                 extent2 = max(lm2.get("measured_width") or 0.45, lm2.get("measured_depth") or 0.45, 0.40)
-                radius_xy = max(self.merge_radius_m, max(extent1, extent2) * 0.70)
+                radius_xy = max(base_radius, max(extent1, extent2) * 0.70)
                 height = max(lm1.get("measured_height") or 0.70, lm2.get("measured_height") or 0.70)
 
                 if dist_xy <= radius_xy and dist_z <= (height * 0.85 + 0.35):
@@ -1474,7 +1501,7 @@ def main() -> None:
 
                 # Step 2: robust foreground depth association (handles hollow furniture/chairs)
                 z_m, adj_u, adj_v = sample_box_foreground_depth_m(
-                    depth_mm, [x1, y1, x2, y2], pin["u"], pin["v"], mask=raw_mask
+                    depth_mm, [x1, y1, x2, y2], pin["u"], pin["v"], mask=raw_mask, class_label=class_name
                 )
                 if z_m is None:
                     stats["rejected_no_depth_value"] += 1
@@ -1558,12 +1585,15 @@ def main() -> None:
                 LOG.debug("      %-18s conf=%.2f d=%.2fm cam=(%.2f,%.2f,%.2f) -> world[%s]=(%.3f,%.3f,%.3f)",
                           class_name, float(conf or 0), z_m, cx, cy, cz, world_frame, wx, wy, wz)
 
-                if not (SANE_WORLD_Z_MIN_M <= wz <= SANE_WORLD_Z_MAX_M):
+                # Physical height sanity gate (prevents depth leaking through tilt lever-arm into ground/sub-floor)
+                is_door = "door" in class_name.lower()
+                min_valid_z = 0.20 if is_door else SANE_WORLD_Z_MIN_M
+                if not (min_valid_z <= wz <= SANE_WORLD_Z_MAX_M):
                     stats["implausible_height_pins"] += 1
-                    if stats["implausible_height_pins"] <= 5:
-                        LOG.warning("      %-18s world Z=%.2fm is outside [%.1f, %.1f] - check the TF chain "
-                                    "(is depth leaking into the height axis?)",
-                                    class_name, wz, SANE_WORLD_Z_MIN_M, SANE_WORLD_Z_MAX_M)
+                    if stats["implausible_height_pins"] <= 10:
+                        LOG.warning("      %-18s world Z=%.2fm is outside [%.2f, %.2f] - dropping implausible pin",
+                                    class_name, wz, min_valid_z, SANE_WORLD_Z_MAX_M)
+                    continue
 
                 # Extract 3D physical surface points (guided by raw mask)
                 pin["surface_points"] = extract_world_surface_points(

@@ -218,7 +218,7 @@ class HospitalComplianceEvaluator:
                     "door_instance": door.get("instance_id"),
                     "coordinates": (round(float(door["X"]), 2), round(float(door["Y"]), 2), round(float(door["Z"]), 2)),
                     "obstructing_items": obstructing,
-                    "reason": f"Emergency fire door egress is obstructed by {len(obstructing)} movable item(s) within the 1.0m keep-clear swing zone.",
+                    "reason": f"Emergency evacuation egress ({door.get('class_name', 'door')} #{door.get('instance_id', did)}) is obstructed by {len(obstructing)} movable item(s) within the 1.0m keep-clear swing zone.",
                 })
             else:
                 dzone.is_obstructed = False

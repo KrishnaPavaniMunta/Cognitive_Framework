@@ -665,6 +665,7 @@ class SpatialSceneGraph:
             if "exit_sign" in n.class_name.lower() or "fire_exit" in n.class_name.lower()
         ]
 
+        signs_with_doors = set()
         for node in self.nodes.values():
             if "door" not in node.class_name.lower():
                 continue
@@ -681,13 +682,12 @@ class SpatialSceneGraph:
                 dy = sign.centroid[1] - cy
                 lat_dist = math.hypot(dx, dy)
                 vert_dz = sign.centroid[2] - cz
-                # Exit sign must be within lateral reach of the door opening and at/above door height
-                if lat_dist <= max(2.0, rw + 1.0) and vert_dz >= -0.25:
+                if lat_dist <= max(2.2, rw + 1.2) and vert_dz >= -0.35:
                     is_fire_exit = True
                     matched_sign_id = sign.node_id
+                    signs_with_doors.add(sign.node_id)
                     break
 
-            # Check if landmark votes explicitly classified this door as an exit
             if not is_fire_exit:
                 for lm_raw in self.raw_landmarks:
                     if int(lm_raw.get("landmark_id", -1)) == node.node_id:
@@ -696,11 +696,9 @@ class SpatialSceneGraph:
                             is_fire_exit = True
                             break
 
-            # ONLY activate keep-clear egress zone for Emergency Fire Exit doors!
             if not is_fire_exit:
                 continue
 
-            # Determine egress normal facing into the corridor
             if corridor_center is not None:
                 dx = corridor_center[0] - cx
                 dy = corridor_center[1] - cy
@@ -728,6 +726,47 @@ class SpatialSceneGraph:
                 width=max(0.75, rw),
                 height=max(1.80, rh),
                 radius=1.00,  # Andrea's fire door rule: 1.0m keep-clear arc
+                egress_normal=normal,
+                z_min=z_bottom,
+                z_max=z_top,
+                required_clear_width=0.85,
+                is_fire_exit=True,
+                status="CLEAR",
+                color_hex="#2ecc71",
+            )
+
+        # 2. Also build 1.0m Keep-Clear Egress Zones directly beneath any standalone Exit Signs!
+        for sign in exit_sign_nodes:
+            if sign.node_id in signs_with_doors:
+                continue
+            sx, sy, sz = sign.centroid
+            if corridor_center is not None:
+                dx = corridor_center[0] - sx
+                dy = corridor_center[1] - sy
+                dist = math.hypot(dx, dy)
+                normal = (dx / dist, dy / dist) if dist > 1e-4 else (0.0, 1.0)
+            elif self.camera_poses:
+                poses_arr = np.asarray([(p[0], p[1]) for p in self.camera_poses], dtype=np.float32)
+                diff = poses_arr - np.array([sx, sy], dtype=np.float32)
+                dists = np.hypot(diff[:, 0], diff[:, 1])
+                nearest_idx = int(np.argmin(dists))
+                nearest_p = poses_arr[nearest_idx]
+                dx = float(nearest_p[0] - sx)
+                dy = float(nearest_p[1] - sy)
+                dist = math.hypot(dx, dy)
+                normal = (dx / dist, dy / dist) if dist > 1e-4 else (0.0, 1.0)
+            else:
+                normal = (0.0, 1.0)
+
+            z_bottom = self.floor_elevation_z
+            z_top = self.floor_elevation_z + 2.10
+
+            self.door_zones[sign.node_id] = DoorKeepClearZone3D(
+                door_id=sign.node_id,
+                center=(sx, sy, self.floor_elevation_z + 1.05),
+                width=1.00,
+                height=2.10,
+                radius=1.00,
                 egress_normal=normal,
                 z_min=z_bottom,
                 z_max=z_top,
@@ -832,8 +871,8 @@ class SpatialSceneGraph:
                     ))
 
                 # ── 2. Functional Safety & Emergency Exit Obstruction ────────
-                # Check A blocking emergency fire door B
-                if "door" in cls_b and node_a.is_movable:
+                # Check A blocking emergency fire door B or exit sign egress
+                if ("door" in cls_b or "exit_sign" in cls_b or "fire_exit" in cls_b) and node_a.is_movable:
                     dzone = self.door_zones.get(id_b)
                     if dzone is not None:
                         blocked, pen_m, def_m = dzone.intersects_box(box_a)
@@ -858,8 +897,8 @@ class SpatialSceneGraph:
                                 evidence=f"Obstacle intrudes {pen_m:.2f}m into 1.0m emergency fire exit keep-clear zone (width deficit: {def_m:.2f}m)",
                             ))
 
-                # Check B blocking emergency fire door A
-                if "door" in cls_a and node_b.is_movable:
+                # Check B blocking emergency fire door A or exit sign egress
+                if ("door" in cls_a or "exit_sign" in cls_a or "fire_exit" in cls_a) and node_b.is_movable:
                     dzone = self.door_zones.get(id_a)
                     if dzone is not None:
                         blocked, pen_m, def_m = dzone.intersects_box(box_b)

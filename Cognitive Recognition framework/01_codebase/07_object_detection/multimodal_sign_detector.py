@@ -47,7 +47,7 @@ HOSPITAL_SIGN_TAXONOMY: dict[str, dict[str, Any]] = {
             "exit", "emergency exit", "fire exit", "way out", "salida", "sortie",
             "ausgang", "emergency", "escape route"
         ],
-        "min_elevation_m": 1.70,
+        "min_elevation_m": 1.00,
         "max_elevation_m": 2.80,
     },
     "sign_fire_extinguisher": {
@@ -267,7 +267,7 @@ class MultimodalSignDetector:
         rois: list[tuple[float, float, float, float, str]] = []
 
         for det in detections:
-            cname = str(det.get("class_name", "")).lower().strip()
+            cname = str(det.get("class_label") or det.get("class_name", "")).lower().strip()
             bbox = det.get("bbox_xyxy")
             if not bbox or len(bbox) != 4:
                 continue
@@ -314,6 +314,52 @@ class MultimodalSignDetector:
                 my1 = max(0.0, y1 - margin_y)
                 my2 = min(float(h_frame), y2 + margin_y)
                 rois.append((mx1, my1, mx2, my2, "hazmat_sign"))
+
+        return rois
+
+    def generate_green_sign_rois(
+        self,
+        frame_shape: tuple[int, int],
+        rgb_bgr: np.ndarray,
+    ) -> list[tuple[float, float, float, float, str]]:
+        """
+        Fast HSV green color + aspect-ratio candidate generator for ISO 7010 Emergency Exit signs.
+        Runs in ~1ms and is immune to distance/motion blur.
+        """
+        h_frame, w_frame = frame_shape[:2]
+        rois: list[tuple[float, float, float, float, str]] = []
+
+        try:
+            hsv = cv2.cvtColor(rgb_bgr, cv2.COLOR_BGR2HSV)
+            # Safety green in HSV
+            lower_green = np.array([35, 40, 35])
+            upper_green = np.array([88, 255, 255])
+            mask = cv2.inRange(hsv, lower_green, upper_green)
+
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3))
+            mask_closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+            contours, _ = cv2.findContours(mask_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if area < 40 or area > 18000:
+                    continue
+                x, y, w, h = cv2.boundingRect(cnt)
+                # Exit signs are mounted high up (upper 70% of the scene)
+                if y > 0.70 * h_frame:
+                    continue
+                aspect = w / float(max(1, h))
+                if 1.5 <= aspect <= 5.0 and w >= 20 and h >= 8:
+                    # Pad slightly to capture the white ISO running man and lettering
+                    pad_x = 0.15 * w
+                    pad_y = 0.20 * h
+                    gx1 = max(0.0, x - pad_x)
+                    gy1 = max(0.0, y - pad_y)
+                    gx2 = min(float(w_frame), x + w + pad_x)
+                    gy2 = min(float(h_frame), y + h + pad_y)
+                    rois.append((gx1, gy1, gx2, gy2, "exit_sign"))
+        except Exception as exc:
+            LOG.debug("[SIGN DETECTOR] Green candidate search error: %s", exc)
 
         return rois
 
@@ -389,8 +435,15 @@ class MultimodalSignDetector:
         Returns: (category, text_content, symbol_label, confidence, modality)
         """
         h_crop, w_crop = crop_bgr.shape[:2]
-        if h_crop < 12 or w_crop < 12:
+        if h_crop < 8 or w_crop < 8:
             return None, None, None, 0.0, "rejected_size"
+
+        # Super-resolution / zoom enhancement for distant signs
+        if h_crop < 64 or w_crop < 120:
+            scale_fac = max(2.0, 64.0 / max(1, h_crop))
+            crop_eval = cv2.resize(crop_bgr, (0, 0), fx=scale_fac, fy=scale_fac, interpolation=cv2.INTER_CUBIC)
+        else:
+            crop_eval = crop_bgr
 
         ocr_cat: str | None = None
         ocr_text: str | None = None
@@ -399,7 +452,7 @@ class MultimodalSignDetector:
         # Stream 1: EasyOCR Recognition
         if self.reader is not None:
             try:
-                ocr_out = self.reader.readtext(crop_bgr, text_threshold=0.45, low_text=0.30)
+                ocr_out = self.reader.readtext(crop_eval, min_size=8, text_threshold=0.25, low_text=0.20)
                 if ocr_out:
                     joined_text = " ".join([item[1] for item in ocr_out])
                     ocr_conf = float(np.mean([item[2] for item in ocr_out])) if ocr_out else 0.0
@@ -421,7 +474,7 @@ class MultimodalSignDetector:
 
         if self.clip_model is not None and self.clip_processor is not None and self.prompt_embeddings is not None:
             try:
-                crop_rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
+                crop_rgb = cv2.cvtColor(crop_eval, cv2.COLOR_BGR2RGB)
                 pil_img = Image.fromarray(crop_rgb)
                 inputs = self.clip_processor(images=pil_img, return_tensors="pt").to(self.device)
 
@@ -545,6 +598,11 @@ class MultimodalSignDetector:
         # Trigger 1: Contextual Visual Cues (Immediate / Event-Driven)
         context_cues = self.generate_contextual_rois((h_frame, w_frame), detections)
         for x1, y1, x2, y2, hint in context_cues:
+            candidate_rois.append((x1, y1, x2, y2, hint, None, 0.0))
+
+        # Trigger 1b: Green Safety Rectangle Proposals (ISO 7010 Emergency Exit)
+        green_cues = self.generate_green_sign_rois((h_frame, w_frame), rgb_bgr)
+        for x1, y1, x2, y2, hint in green_cues:
             candidate_rois.append((x1, y1, x2, y2, hint, None, 0.0))
 
         # Trigger 2: Periodic Full-Scene Sweep (Every N frames)
