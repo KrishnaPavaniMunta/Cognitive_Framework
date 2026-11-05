@@ -804,16 +804,16 @@ class RerunSceneLogger:
                 parent_cls = str(dz.get("parent_class", "door")).lower()
                 parent_inst = dz.get("parent_instance") or did
                 cls_title = "Exit Sign" if "exit" in parent_cls else "Door"
-                rr.log(
-                    f"world/door_zones/fire_exit_door_{did}_zone",
-                    rr.LineStrips3D(
-                        strips_list,
-                        colors=[zone_color] * len(strips_list),
-                        radii=0.022,
-                        labels=[f"{cls_title} {parent_inst} 3D Egress Zone [{status_label}] (r={dz.get('radius_m', 1.0)}m, h={dz.get('height_m', 2.0)}m)"],
-                    ),
-                    static=True,
+                slug = "exit_sign" if "exit" in parent_cls else "door"
+                zone_label = f"{cls_title} {parent_inst} 3D Egress Zone [{status_label}] (r={dz.get('radius_m', 1.0)}m, h={dz.get('height_m', 2.0)}m)"
+                strips_comp = rr.LineStrips3D(
+                    strips_list,
+                    colors=[zone_color] * len(strips_list),
+                    radii=0.022,
+                    labels=[zone_label],
                 )
+                rr.log(f"world/egress_zones/{slug}_{parent_inst}_egress_zone", strips_comp, static=True)
+                rr.log(f"world/door_zones/fire_exit_door_{did}_zone", strips_comp, static=True)
 
     def finish(self) -> None:
         self.log_navigable_zone()

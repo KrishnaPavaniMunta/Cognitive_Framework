@@ -2,23 +2,22 @@
 Export a lightweight, instant-loading canonical RRD file from world_map.db.
 
 Contains:
-- Full 3D environment point cloud (hallway walls, floor, structural background)
-- All consensus landmarks with physical 3D surface point clouds
+- Full 3D structural perimeter wall points from 2D/3D LiDAR (corridor boundaries)
+- Navigable floor boundary polygon
 - Camera trajectory path
-- Navigable floor boundary
-- 3D Semi-Cylindrical Keep-Clear Egress Volumes on Emergency Fire Exit doors (Green/Red)
+- All consensus landmarks with physical 3D surface point clouds and wireframe bounding boxes
+- Unified object surface point cloud
+- 3D Semi-Cylindrical Keep-Clear Egress Volumes on Emergency Fire Exit doors and Exit Signs (Green/Red)
 - Compliance hazard lines
 
-Excludes heavy raw video frames (1080p images), maintaining fast loading (~5-7 MB).
+Excludes heavy raw video frames (1080p images), maintaining fast loading (~2-5 MB).
 """
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
-import shutil
 import sqlite3
-import subprocess
 import sys
 
 import numpy as np
@@ -28,55 +27,32 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from rerun_logger import class_color, landmark_metadata, stable_landmark_path
+from rerun_logger import class_color, landmark_metadata, resolve_box_half_size, stable_landmark_path
 
 
 def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
     db_path = Path(db_path).resolve()
     out_rrd = Path(out_rrd).resolve()
     run_dir = db_path.parent
-    history_dir = run_dir / "run_history"
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
-    # 1. Look for existing dense archive RRD with environment point clouds
-    dense_cloud_extracted = False
-    temp_cloud_rrd = run_dir / "_temp_env_cloud.rrd"
-    temp_semantic_rrd = run_dir / "_temp_semantic.rrd"
-
-    # Search for latest archive in run_history
-    archive_candidates = sorted(history_dir.glob("world_map_*.rrd"), key=lambda p: p.stat().st_mtime, reverse=True)
-    rerun_bin = sys.executable.replace("python.exe", "rerun.exe")
-
-    if archive_candidates and Path(rerun_bin).exists():
-        latest_archive = archive_candidates[0]
+    if out_rrd.exists():
         try:
-            # Preserve the existing dense environment point clouds and camera video feeds
-            shutil.copy2(latest_archive, temp_cloud_rrd)
-            if temp_cloud_rrd.exists() and temp_cloud_rrd.stat().st_size > 10000:
-                dense_cloud_extracted = True
-        except Exception as exc:
-            print(f"Warning: could not preserve archive point cloud: {exc}")
-
-    # 2. Write semantic landmarks, door keep-clear volumes, and hazards
-    target_write_rrd = temp_semantic_rrd if dense_cloud_extracted else out_rrd
-    if target_write_rrd.exists():
-        target_write_rrd.unlink()
+            out_rrd.unlink()
+        except Exception:
+            pass
 
     app_id = f"semantic_map/{run_dir.name}"
     rr.init(app_id, recording_id=f"canonical_{run_dir.name}")
-    rr.save(str(target_write_rrd))
+    rr.save(str(out_rrd))
 
-    # Send strict single-map layout blueprint
+    # Send strict single 3D Semantic Map blueprint
     try:
         import rerun.blueprint as rrb
         blueprint = rrb.Blueprint(
-            rrb.Horizontal(
-                rrb.Spatial3DView(origin="world", name="3D Semantic Map"),
-                rrb.Spatial2DView(origin="world/camera/image", name="Annotated 2D Video"),
-                column_shares=[3, 2],
-            ),
+            rrb.Spatial3DView(origin="world", name="3D Semantic Map"),
             collapse_panels=False,
         )
         rr.send_blueprint(blueprint)
@@ -86,7 +62,7 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
     # Set right-hand Z-up coordinate system
     rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
 
-    # Log Trajectory
+    # 1. Log Trajectory
     poses = conn.execute("SELECT x, y, z FROM camera_poses ORDER BY frame_index").fetchall()
     if poses:
         traj_pts = np.array([[p["x"], p["y"], p["z"]] for p in poses], dtype=np.float32)
@@ -98,37 +74,79 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
             static=True,
         )
 
-    # Log Navigable Floor Boundary
+    # 2. Log Navigable Floor Boundary and LiDAR Perimeter Walls
     zones = conn.execute("SELECT * FROM navigable_zones WHERE zone_name = 'Floor'").fetchall()
     for z in zones:
-        min_x, max_x = z["min_x"], z["max_x"]
-        min_y, max_y = z["min_y"], z["max_y"]
-        ez = z["elevation_z"]
-        box_rect = np.array([
-            [min_x, min_y, ez],
-            [max_x, min_y, ez],
-            [max_x, max_y, ez],
-            [min_x, max_y, ez],
-            [min_x, min_y, ez],
-        ], dtype=np.float32)
-        rr.log(
-            "world/zones/navigable_boundary",
-            rr.LineStrips3D([box_rect], colors=[[100, 180, 140]], radii=0.035, labels=["Floor"]),
-            static=True,
-        )
+        ez = float(z["elevation_z"]) if z["elevation_z"] is not None else 0.0
+        keys = z.keys()
 
-    # Log Landmarks with real surface point clouds
+        # Floor boundary polygon
+        poly_logged = False
+        if "polygon_json" in keys and z["polygon_json"]:
+            try:
+                poly_pts = json.loads(z["polygon_json"])
+                if poly_pts and len(poly_pts) >= 3:
+                    poly_3d = np.array([[p[0], p[1], ez] for p in poly_pts] + [[poly_pts[0][0], poly_pts[0][1], ez]], dtype=np.float32)
+                    rr.log(
+                        "world/zones/navigable_boundary",
+                        rr.LineStrips3D([poly_3d], colors=[[100, 180, 140]], radii=0.035, labels=["Floor"]),
+                        static=True,
+                    )
+                    poly_logged = True
+            except Exception:
+                pass
+
+        if not poly_logged:
+            min_x, max_x = float(z["min_x"]), float(z["max_x"])
+            min_y, max_y = float(z["min_y"]), float(z["max_y"])
+            box_rect = np.array([
+                [min_x, min_y, ez],
+                [max_x, min_y, ez],
+                [max_x, max_y, ez],
+                [min_x, max_y, ez],
+                [min_x, min_y, ez],
+            ], dtype=np.float32)
+            rr.log(
+                "world/zones/navigable_boundary",
+                rr.LineStrips3D([box_rect], colors=[[100, 180, 140]], radii=0.035, labels=["Floor"]),
+                static=True,
+            )
+
+        # Structural LiDAR Perimeter Walls (hallway layout)
+        if "lidar_perimeter_json" in keys and z["lidar_perimeter_json"]:
+            try:
+                lidar_pts = json.loads(z["lidar_perimeter_json"])
+                if lidar_pts:
+                    pts_3d = []
+                    for pt in lidar_pts:
+                        if len(pt) == 2:
+                            pts_3d.append([float(pt[0]), float(pt[1]), ez + 0.35])
+                        elif len(pt) >= 3:
+                            pts_3d.append([float(pt[0]), float(pt[1]), float(pt[2])])
+                    if pts_3d:
+                        pts_arr = np.array(pts_3d, dtype=np.float32)
+                        rr.log(
+                            "world/lidar/perimeter_points",
+                            rr.Points3D(pts_arr, colors=[[160, 175, 195]], radii=0.018),
+                            static=True,
+                        )
+            except Exception:
+                pass
+
+    # 3. Log Consolidated Consensus Landmarks with Surface Point Clouds and 3D Bounding Boxes
     landmarks = conn.execute("SELECT * FROM semantic_map").fetchall()
     lm_by_label: dict[str, tuple[float, float, float]] = {}
     all_pts_list = []
     all_colors_list = []
     count = 0
+
     for row in landmarks:
         lm = dict(row)
         landmark_id = lm["landmark_id"]
         class_name = lm["class_name"]
         instance_id = lm.get("instance_id") or landmark_id
-        label = f"{class_name} {instance_id}"
+        is_floor = str(class_name).strip().lower() in ("floor", "navigable_floor")
+        label = "Floor" if is_floor else f"{class_name} {instance_id}"
         center = np.asarray([[lm["X"], lm["Y"], lm["Z"]]], dtype=np.float32)
         lm_by_label[label] = (float(lm["X"]), float(lm["Y"]), float(lm["Z"]))
 
@@ -138,6 +156,7 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
             color = [class_color(class_name)]
 
         path = stable_landmark_path(lm, landmark_id)
+        half_size = resolve_box_half_size(lm)
 
         surf_raw = lm.get("surface_points_json")
         pts = None
@@ -155,7 +174,8 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
                 rr.Points3D(
                     pts,
                     colors=[color[0]] * len(pts),
-                    radii=0.035,
+                    labels=[label],
+                    radii=0.032,
                 ),
                 rr.AnyValues(**landmark_metadata(lm, landmark_id)),
                 static=True,
@@ -172,19 +192,33 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
                 rr.AnyValues(**landmark_metadata(lm, landmark_id)),
                 static=True,
             )
+
+        # 3D Bounding Box wireframe
+        if not is_floor:
+            rr.log(
+                f"{path}/bounds",
+                rr.Boxes3D(
+                    centers=center,
+                    half_sizes=np.asarray(half_size, dtype=np.float32),
+                    colors=color,
+                    fill_mode="MajorWireframe",
+                ),
+                static=True,
+            )
+
         count += 1
 
-    # Log unified object surface point cloud
+    # 4. Log Unified Object Surface Point Cloud
     if all_pts_list:
         combined_pts = np.vstack(all_pts_list)
         combined_colors = np.vstack(all_colors_list)
         rr.log(
             "world/pointcloud",
-            rr.Points3D(combined_pts, colors=combined_colors, radii=0.038),
+            rr.Points3D(combined_pts, colors=combined_colors, radii=0.035),
             static=True,
         )
 
-    # Log 3D Compliance Hazard Lines
+    # 5. Log 3D Compliance Hazard Lines
     report_path = db_path.with_name("hospital_compliance_report.json")
     if report_path.exists():
         try:
@@ -220,14 +254,16 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
         except Exception as exc:
             print(f"Warning: could not log compliance hazards to RRD: {exc}")
 
-    # Log 3D Semi-Cylindrical Keep-Clear Volumes (ONLY Emergency Fire Exits with Exit Signs on top)
-    graph_path = db_path.with_name("spatial_scene_graph.json")
-    if graph_path.exists():
+    # 6. Log 3D Semi-Cylindrical Keep-Clear Egress Volumes (Fire Exits and Exit Signs)
+    zones_source_path = report_path if report_path.exists() else db_path.with_name("spatial_scene_graph.json")
+    if zones_source_path.exists():
         try:
-            with open(graph_path, "r", encoding="utf-8") as f:
-                graph_data = json.load(f)
-            door_zones = graph_data.get("door_keep_clear_zones", [])
+            with open(zones_source_path, "r", encoding="utf-8") as f:
+                zones_data = json.load(f)
+            door_zones = zones_data.get("door_keep_clear_zones", [])
             for dz in door_zones:
+                if not dz.get("is_fire_exit", True):
+                    continue
                 did = dz.get("door_id")
                 is_obstructed = dz.get("is_obstructed", False)
                 status_label = dz.get("status", "CLEAR")
@@ -264,16 +300,17 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
                     parent_cls = str(dz.get("parent_class", "door")).lower()
                     parent_inst = dz.get("parent_instance") or did
                     cls_title = "Exit Sign" if "exit" in parent_cls else "Door"
-                    rr.log(
-                        f"world/door_zones/fire_exit_door_{did}_zone",
-                        rr.LineStrips3D(
-                            strips_list,
-                            colors=[zone_color] * len(strips_list),
-                            radii=0.022,
-                            labels=[f"{cls_title} {parent_inst} 3D Egress Zone [{status_label}] (r={dz.get('radius_m', 1.0)}m, h={dz.get('height_m', 2.0)}m)"],
-                        ),
-                        static=True,
+                    slug = "exit_sign" if "exit" in parent_cls else "door"
+                    zone_label = f"{cls_title} {parent_inst} 3D Egress Zone [{status_label}] (r={dz.get('radius_m', 1.0)}m, h={dz.get('height_m', 2.0)}m)"
+                    strips_comp = rr.LineStrips3D(
+                        strips_list,
+                        colors=[zone_color] * len(strips_list),
+                        radii=0.022,
+                        labels=[zone_label],
                     )
+                    # Log under both clear descriptive path and backwards-compatible path
+                    rr.log(f"world/egress_zones/{slug}_{parent_inst}_egress_zone", strips_comp, static=True)
+                    rr.log(f"world/door_zones/fire_exit_door_{did}_zone", strips_comp, static=True)
         except Exception as exc:
             print(f"Warning: could not log door keep-clear zones to RRD: {exc}")
 
@@ -282,32 +319,13 @@ def export_clean_rrd(db_path: Path, out_rrd: Path) -> Path:
     # Flush Rerun writer
     rr.disconnect()
 
-    # 3. Merge dense environment point cloud and semantic landmarks into canonical out_rrd
-    if dense_cloud_extracted and temp_cloud_rrd.exists() and temp_semantic_rrd.exists():
-        try:
-            cmd_merge = [
-                str(rerun_bin), "rrd", "merge",
-                "-o", str(out_rrd),
-                str(temp_cloud_rrd),
-                str(temp_semantic_rrd)
-            ]
-            subprocess.run(cmd_merge, capture_output=True, text=True, timeout=30)
-            if temp_cloud_rrd.exists():
-                temp_cloud_rrd.unlink()
-            if temp_semantic_rrd.exists():
-                temp_semantic_rrd.unlink()
-        except Exception as exc:
-            print(f"Warning: could not merge environment cloud: {exc}")
-            if temp_semantic_rrd.exists():
-                shutil.move(str(temp_semantic_rrd), str(out_rrd))
-
     file_size_mb = out_rrd.stat().st_size / (1024 * 1024) if out_rrd.exists() else 0.0
-    print(f"Exported {count} landmarks, full point cloud, and trajectory to {out_rrd} (size: {file_size_mb:.2f} MB)")
+    print(f"Exported {count} consolidated landmarks, full point clouds, LiDAR boundaries, and trajectory to {out_rrd} (size: {file_size_mb:.2f} MB)")
     return out_rrd
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Export clean RRD from world_map.db")
+    parser = argparse.ArgumentParser(description="Export clean canonical RRD from world_map.db")
     parser.add_argument("--db", type=Path, default=Path("04_outputs_runs_and_logs/outputs/semantic_maps/rgbd_clean_20260925_134830/world_map.db"))
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
