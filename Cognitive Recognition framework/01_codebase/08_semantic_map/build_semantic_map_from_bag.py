@@ -810,6 +810,10 @@ class SemanticMapDB:
         self.conn.execute("DELETE FROM semantic_map")
         rows = []
         for lid, lm in self._landmarks.items():
+            # Signs require at least 10 observations to be confirmed as persistent environmental signage
+            if "sign" in lm["class_name"].lower() and int(lm.get("hit_count") or 1) < 10:
+                continue
+
             pts = lm.get("surface_points")
             if pts is not None and isinstance(pts, np.ndarray):
                 pts_json = json.dumps(pts.tolist())
@@ -1768,6 +1772,7 @@ def main() -> None:
             consensus_landmarks = {
                 lid: lm for lid, lm in db.landmarks.items()
                 if lm["hit_count"] >= max(1, args.min_consensus_hits)
+                and not ("sign" in lm["class_name"].lower() and int(lm.get("hit_count") or 1) < 10)
             }
             knowledge_base = OntologyKnowledgeBase(Path(args.ontology).resolve())
             knowledge_by_class = {

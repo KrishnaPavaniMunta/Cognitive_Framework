@@ -56,6 +56,9 @@ Every generated `world_map.rrd` must contain all six of the following constituen
 2. **Door Keep-Clear Zones (Egress Cylinders)**:
    - Must be preserved and rendered whenever exit doors or exit signs exist in the digital twin.
    - Both Rerun (`world_map.rrd`) and the Web viewer (`semantic_map_ontology.html`) must display the 3D semi-cylindrical volumes.
+3. **Persistent Signage Observation Threshold ($\ge 10$ hits)**:
+   - Signs (`exit_sign`, `hazmat_sign`, `sign_prohibition_access`, etc.) must accumulate at least 10 observations across multi-view reconstruction to be confirmed as genuine persistent environmental signage.
+   - Transient 1–3 hit false positives (e.g. paper notices or badges taped to door glass) are rejected from creating safety landmarks or falsely designating interior doors as fire exits.
 
 ---
 

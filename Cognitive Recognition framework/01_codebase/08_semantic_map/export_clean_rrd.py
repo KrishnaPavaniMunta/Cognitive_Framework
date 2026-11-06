@@ -254,6 +254,11 @@ def export_clean_rrd(db_path: Path, out_rrd: Path | None = None) -> Path:
         lm = dict(row)
         landmark_id = lm["landmark_id"]
         class_name = lm["class_name"]
+
+        # Signs require at least 10 observations to be confirmed as persistent environmental signage
+        if "sign" in class_name.lower() and int(lm.get("hit_count") or 1) < 10:
+            continue
+
         instance_id = lm.get("instance_id") or landmark_id
         is_floor = str(class_name).strip().lower() in ("floor", "navigable_floor")
         label = "Floor" if is_floor else f"{class_name} #{instance_id}"

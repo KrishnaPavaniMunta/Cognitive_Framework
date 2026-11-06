@@ -626,6 +626,10 @@ class SpatialSceneGraph:
             else:
                 tier = "ceiling"
 
+            # Signs require at least 10 observations to be confirmed as persistent environmental signage
+            if "sign" in cname and int(lm.get("hit_count") or 1) < 10:
+                continue
+
             self.nodes[lid] = SceneNode(
                 node_id=lid,
                 class_name=lm["class_name"],
@@ -661,10 +665,11 @@ class SpatialSceneGraph:
                 pts_arr = np.asarray(all_pts, dtype=np.float32)
                 corridor_center = (float(np.mean(pts_arr[:, 0])), float(np.mean(pts_arr[:, 1])))
 
-        # 1. Identify all exit sign landmarks
+        # 1. Identify all persistent exit sign landmarks (min 10 observations to reject transient noise)
         exit_sign_nodes = [
             n for n in self.nodes.values()
-            if "exit_sign" in n.class_name.lower() or "fire_exit" in n.class_name.lower()
+            if ("exit_sign" in n.class_name.lower() or "fire_exit" in n.class_name.lower())
+            and n.hit_count >= 10
         ]
 
         signs_with_doors = set()
@@ -676,7 +681,7 @@ class SpatialSceneGraph:
             rw = node.extents[1]  # measured width
             rh = node.extents[2]  # measured height
 
-            # Check if this door has an exit sign above or on top of it (Emergency Fire Exit)
+            # Check if this door has a persistent exit sign above or on top of it (Emergency Fire Exit)
             is_fire_exit = False
             matched_sign_id = None
             for sign in exit_sign_nodes:
@@ -691,12 +696,10 @@ class SpatialSceneGraph:
                     break
 
             if not is_fire_exit:
-                for lm_raw in self.raw_landmarks:
-                    if int(lm_raw.get("landmark_id", -1)) == node.node_id:
-                        votes = lm_raw.get("class_votes_json") or ""
-                        if "exit" in votes.lower():
-                            is_fire_exit = True
-                            break
+                # Door is only a fire exit if its consensus class is explicitly fire_exit or exit_door
+                cls_lower = node.class_name.lower()
+                if "fire_exit" in cls_lower or "exit_door" in cls_lower:
+                    is_fire_exit = True
 
             if not is_fire_exit:
                 continue

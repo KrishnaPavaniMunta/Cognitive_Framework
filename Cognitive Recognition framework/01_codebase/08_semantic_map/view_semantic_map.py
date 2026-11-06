@@ -59,7 +59,12 @@ def load_landmarks(conn: sqlite3.Connection, min_hits: int, classes: set[str] | 
         f"SELECT {', '.join(selected)} FROM semantic_map WHERE hit_count >= ? ORDER BY class_name, landmark_id",
         (int(min_hits),),
     ).fetchall()
-    landmarks = [dict(zip(selected, row)) for row in rows]
+    raw_landmarks = [dict(zip(selected, row)) for row in rows]
+    # Signs require at least 10 observations to be confirmed as persistent environmental signage
+    landmarks = [
+        lm for lm in raw_landmarks
+        if not ("sign" in lm["class_name"].lower() and int(lm.get("hit_count") or 1) < 10)
+    ]
 
     class_counts: dict[str, int] = {}
     for landmark in landmarks:
