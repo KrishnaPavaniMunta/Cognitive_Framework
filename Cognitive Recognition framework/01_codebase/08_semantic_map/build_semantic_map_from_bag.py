@@ -45,6 +45,8 @@ OBJECT_DETECTION_DIR = CODEBASE_DIR / "07_object_detection"
 ONTOLOGY_DIR = CODEBASE_DIR / "09_ontology"
 DEFAULT_ONTOLOGY = ONTOLOGY_DIR / "ontology.rdf"
 
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 if str(OBJECT_DETECTION_DIR) not in sys.path:
     sys.path.insert(0, str(OBJECT_DETECTION_DIR))
 if str(ONTOLOGY_DIR) not in sys.path:
@@ -148,13 +150,24 @@ def sample_box_foreground_depth_m(
 
     # 2. Fallback if no segmentation mask or mask has insufficient valid depth pixels:
     # Use bounding box inner region to resist boundary bleeding
-    inner_x1 = max(0, int(bx1 + 0.10 * bw))
-    inner_x2 = min(w_img, int(bx2 - 0.10 * bw))
-    inner_y1 = max(0, int(by1 + 0.10 * bh))
-    # If the object is a door, sample exclusively from upper 40% (lintel/casing) to bypass foreground obstacles
-    if "door" in str(class_label).lower():
+    lbl_lower = str(class_label).lower()
+    is_sign = "sign" in lbl_lower or lbl_lower in ("room_sign", "notice_board", "directional_sign", "safety_sign", "equipment_sign", "hazmat_sign")
+    if is_sign:
+        # Wall placards: sample 20% central region to strictly catch flat wall mounting
+        inner_x1 = max(0, int(bx1 + 0.20 * bw))
+        inner_x2 = min(w_img, int(bx2 - 0.20 * bw))
+        inner_y1 = max(0, int(by1 + 0.20 * bh))
+        inner_y2 = min(h_img, int(by2 - 0.20 * bh))
+    elif "door" in lbl_lower:
+        # If the object is a door, sample exclusively from upper 40% (lintel/casing) to bypass foreground obstacles
+        inner_x1 = max(0, int(bx1 + 0.10 * bw))
+        inner_x2 = min(w_img, int(bx2 - 0.10 * bw))
+        inner_y1 = max(0, int(by1 + 0.10 * bh))
         inner_y2 = min(h_img, int(by1 + 0.40 * bh))
     else:
+        inner_x1 = max(0, int(bx1 + 0.10 * bw))
+        inner_x2 = min(w_img, int(bx2 - 0.10 * bw))
+        inner_y1 = max(0, int(by1 + 0.10 * bh))
         inner_y2 = min(h_img, int(by2 - 0.05 * bh))
     if inner_x2 <= inner_x1 or inner_y2 <= inner_y1:
         inner_x1, inner_x2 = bx1, bx2
@@ -544,6 +557,11 @@ class SemanticMapDB:
             "spillage": 0.70,
             "hazmat_sign": 0.60,
             "exit_sign": 1.30,
+            "room_sign": 0.50,
+            "notice_board": 0.60,
+            "directional_sign": 0.50,
+            "safety_sign": 0.50,
+            "equipment_sign": 0.50,
         }
         base_radius = class_base_radii.get(det_class, self.merge_radius_m)
         det_extent = max(rw or 0.45, rd or 0.45, 0.40)
@@ -720,6 +738,11 @@ class SemanticMapDB:
                     "spillage": 0.70,
                     "hazmat_sign": 0.60,
                     "exit_sign": 1.30,
+                    "room_sign": 0.50,
+                    "notice_board": 0.60,
+                    "directional_sign": 0.50,
+                    "safety_sign": 0.50,
+                    "equipment_sign": 0.50,
                 }
                 base_radius = class_base_radii.get(lm1["class_name"], self.merge_radius_m)
                 extent1 = max(lm1.get("measured_width") or 0.45, lm1.get("measured_depth") or 0.45, 0.40)
@@ -845,6 +868,11 @@ def get_class_bgr(class_name: str) -> tuple[int, int, int]:
         "bench_hosp": (160, 120, 200),
         "hazmat_sign": (0, 215, 255),       # Amber / Yellow
         "exit_sign": (0, 230, 200),
+        "room_sign": (240, 180, 40),        # Cyan / Sky blue
+        "notice_board": (220, 140, 30),     # Deep cyan
+        "directional_sign": (210, 190, 50), # Light cyan
+        "safety_sign": (50, 190, 240),      # Amber
+        "equipment_sign": (200, 100, 160),  # Magenta
         "power_socket": (255, 120, 40),     # Azure / Blue
         "general_bin": (60, 220, 60),       # Lime Green
         "hospital_stretcher": (220, 60, 60), # Blue-Red
@@ -880,11 +908,12 @@ def annotate(frame: np.ndarray, frame_index: int, timestamp_ns: int, pins: list[
 
         is_floor = pin["class_name"].strip().lower() in ("floor", "navigable_floor")
         instance_label = f" {pin['instance_id']}" if pin.get("instance_id") is not None else ""
-        badge_prefix = f"{pin['display_badge']} " if pin.get("display_badge") else ""
         if is_floor:
             head = f"Floor {float(pin['confidence'] or 0):.0%}"
+        elif pin.get("display_badge"):
+            head = f"{pin['display_badge']}{instance_label} {float(pin['confidence'] or 0):.0%}"
         else:
-            head = f"{badge_prefix}{pin['class_name']}{instance_label} {float(pin['confidence'] or 0):.0%}"
+            head = f"{pin['class_name']}{instance_label} {float(pin['confidence'] or 0):.0%}"
         body = (
             f"W({pin['world_X']:.2f},{pin['world_Y']:.2f},{pin['world_Z']:.2f}) d={pin['depth_m']:.2f}m"
             if ok else f"NO 3D: {pin['reject_reason']}"
@@ -1013,8 +1042,8 @@ def parse_args() -> argparse.Namespace:
                    help="Ingest and project 2D LiDAR scans if present")
     p.add_argument("--no-lidar", action="store_false", dest="enable_lidar",
                    help="Disable 2D LiDAR ingestion")
-    p.add_argument("--sign-cadence", type=int, default=20,
-                   help="Cadence in frames for periodic full-scene text sweep (default: 20)")
+    p.add_argument("--sign-cadence", type=int, default=1,
+                   help="Cadence in frames for periodic full-scene text sweep (default: 1)")
     p.add_argument("--verbose", action="store_true", help="Print DEBUG lines to the console too")
     args = p.parse_args()
     if args.rerun_only:
@@ -1235,15 +1264,11 @@ def main() -> None:
     if getattr(args, "enable_sign_detection", True) and not args.rerun_only:
         try:
             from multimodal_sign_detector import MultimodalSignDetector
-            clip_m = getattr(cognition_engine, "clip_model", None)
-            clip_p = getattr(cognition_engine, "clip_processor", None)
             sign_detector = MultimodalSignDetector(
                 use_gpu=(args.detector_device == "cuda"),
-                clip_model=clip_m,
-                clip_processor=clip_p,
                 device=args.detector_device,
             )
-            LOG.info("[SIGN DETECTOR] Multimodal Sign Detector active (cadence: %d frames)", args.sign_cadence)
+            LOG.info("[SIGN DETECTOR] Pure Text OCR Sign Detector active (cadence: %d frames)", args.sign_cadence)
         except Exception as exc:
             LOG.warning("[SIGN DETECTOR] Could not initialize Multimodal Sign Detector: %s", exc)
     if scan_messages:
@@ -1428,6 +1453,7 @@ def main() -> None:
                             "confidence": s.confidence,
                             "source": f"sign_{s.modality}",
                             "display_badge": s.badge_label,
+                            "text_transcription": s.text_content,
                         })
                 except Exception as exc:
                     LOG.warning("[SIGN DETECTOR] Sign detection error at frame %d: %s", processed_counter, exc)
@@ -1485,6 +1511,7 @@ def main() -> None:
                     "eroded_mask": eroded_mask,
                     "surface_points": None,
                     "display_badge": det.get("display_badge"),
+                    "text_transcription": det.get("text_transcription"),
                 }
 
                 if class_name in excluded_classes:
@@ -1521,9 +1548,15 @@ def main() -> None:
 
                     # Step 3: Physical 3D Geometric Gatekeeper directly from Ontology
                     # Checks measured (rw, rd, rh) against limits loaded from ontology.rdf
-                    # Chairs are exempt from physical dimension gating (variable orientations, occlusions, side views)
-                    sign_classes = {"exit_sign", "sign_fire_extinguisher", "hazmat_sign", "sign_radiation", "sign_caution_wet_floor", "sign_prohibition_access"}
-                    if class_name in ontology_limits and class_name != "chair" and class_name not in sign_classes:
+                    # Chairs and all signage classes are exempt from physical dimension gating
+                    is_sign_class = (
+                        class_name.startswith("sign_")
+                        or class_name in (
+                            "exit_sign", "hazmat_sign", "room_sign", "notice_board",
+                            "directional_sign", "safety_sign", "equipment_sign"
+                        )
+                    )
+                    if class_name in ontology_limits and class_name != "chair" and not is_sign_class:
                         lim = ontology_limits[class_name]
                         rw, rd, rh = dims_3d
                         w_ok = lim["min_w"] <= rw <= lim["max_w"]
@@ -1762,39 +1795,52 @@ def main() -> None:
                     LOG.debug("ffmpeg post-encoding skipped: %s", exc)
         cv2.destroyAllWindows()
 
-    from view_semantic_map import refresh_semantic_map_html
-    from export_clean_rrd import export_clean_rrd
-    from hospital_compliance import HospitalComplianceEvaluator, generate_markdown_report
+    try:
+        from view_semantic_map import refresh_semantic_map_html
+        from export_clean_rrd import export_clean_rrd
+        from hospital_compliance import HospitalComplianceEvaluator, generate_markdown_report
+    except Exception as exc:
+        LOG.warning("Failed to import post-processing modules: %s", exc)
+        refresh_semantic_map_html = None
+        export_clean_rrd = None
+        HospitalComplianceEvaluator = None
+        generate_markdown_report = None
 
     # 1. Hospital Health & Safety Compliance Audit (KMi Spatial Reasoner + Andrea's Egress Zones)
     comp_md_path = db_path.with_name("hospital_compliance_report.md")
     comp_json_path = db_path.with_name("hospital_compliance_report.json")
     comp_report = None
-    try:
-        compliance_eval = HospitalComplianceEvaluator(db_path)
-        comp_report = compliance_eval.evaluate_all()
-        with open(comp_json_path, "w", encoding="utf-8") as f:
-            json.dump(comp_report, f, indent=2)
-        with open(comp_md_path, "w", encoding="utf-8") as f:
-            f.write(generate_markdown_report(comp_report))
-        comp_status = "COMPLIANT" if comp_report["overall_compliant"] else "NON-COMPLIANT"
-        LOG.info("[AUDIT] Hospital H&S Compliance: %s (%d violations detected) -> %s",
-                 comp_status, comp_report["total_violations"], comp_md_path)
-    except Exception as exc:
-        LOG.warning("Failed to evaluate hospital compliance: %s", exc)
+    if HospitalComplianceEvaluator is not None:
+        try:
+            compliance_eval = HospitalComplianceEvaluator(db_path)
+            comp_report = compliance_eval.evaluate_all()
+            with open(comp_json_path, "w", encoding="utf-8") as f:
+                json.dump(comp_report, f, indent=2)
+            if generate_markdown_report is not None:
+                with open(comp_md_path, "w", encoding="utf-8") as f:
+                    f.write(generate_markdown_report(comp_report))
+            comp_status = "COMPLIANT" if comp_report.get("overall_compliant") else "NON-COMPLIANT"
+            LOG.info("[AUDIT] Hospital H&S Compliance: %s (%d violations detected) -> %s",
+                     comp_status, comp_report.get("total_violations", 0), comp_md_path)
+        except Exception as exc:
+            LOG.warning("Failed to evaluate hospital compliance: %s", exc)
 
     canonical_rrd_path = db_path.with_name("world_map.rrd")
 
     # 2. Finalize Rerun scene logging with 3D boxes, door zones, and compliance hazards
     if scene is not None:
-        scene.log_landmarks(consensus_landmarks, size_lookup=build_size_lookup())
-        if comp_report is not None:
-            scene.log_compliance(comp_report)
-        scene.finish()
-        LOG.info("[RERUN] Scene written: %d cloud chunks, %d points, %d trajectory poses, %d consensus landmarks",
-                 scene.cloud_chunks, scene.points_logged, len(scene.trajectory), len(consensus_landmarks))
-    else:
-        # If Rerun logging was not active during the run, export canonical digital twin from DB
+        try:
+            scene.log_landmarks(consensus_landmarks, size_lookup=build_size_lookup())
+            if comp_report is not None:
+                scene.log_compliance(comp_report)
+            scene.finish()
+            LOG.info("[RERUN] Scene written: %d cloud chunks, %d points, %d trajectory poses, %d consensus landmarks",
+                     scene.cloud_chunks, scene.points_logged, len(scene.trajectory), len(consensus_landmarks))
+        except Exception as exc:
+            LOG.warning("Failed to finalize Rerun scene: %s", exc)
+
+    # Always ensure clean canonical RRD (~2MB instant loading digital twin) is exported
+    if export_clean_rrd is not None:
         try:
             export_clean_rrd(db_path, canonical_rrd_path)
             LOG.info("[RERUN] Canonical 3D digital twin written: %s", canonical_rrd_path)
@@ -1802,8 +1848,12 @@ def main() -> None:
             LOG.warning("Failed to export canonical RRD: %s", exc)
 
     # 3. Export canonical interactive HTML 3D Digital Twin
-    html_path = refresh_semantic_map_html(db_path, Path(args.ontology).resolve())
-    LOG.info("[HTML ] Current semantic-map viewer written: %s", html_path)
+    if refresh_semantic_map_html is not None:
+        try:
+            html_path = refresh_semantic_map_html(db_path, Path(args.ontology).resolve())
+            LOG.info("[HTML ] Current semantic-map viewer written: %s", html_path)
+        except Exception as exc:
+            LOG.warning("Failed to refresh semantic map HTML: %s", exc)
 
     # ── Report ────────────────────────────────────────────────────────────────
     LOG.info("=" * 78)

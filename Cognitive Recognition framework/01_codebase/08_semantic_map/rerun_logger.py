@@ -95,6 +95,14 @@ def class_color(class_name: str) -> list[int]:
         return [234, 179, 8]   # Warning Yellow for Wet Floor
     if "prohibition" in name_lower or "restricted" in name_lower:
         return [220, 38, 38]   # Red for Restricted / No Entry
+    if "room" in name_lower or "ward" in name_lower:
+        return [40, 160, 220]   # Cyan / Teal for room signs
+    if "notice" in name_lower or "board" in name_lower:
+        return [20, 130, 200]   # Deep cyan for notice boards
+    if "directional" in name_lower or "wayfinding" in name_lower:
+        return [50, 180, 200]   # Light cyan
+    if "equipment_sign" in name_lower:
+        return [160, 100, 200]  # Purple for medical equipment placards
     h = abs(hash(class_name))
     return [80 + (h & 0x7F), 80 + ((h >> 8) & 0x7F), 80 + ((h >> 16) & 0x7F)]
 
@@ -331,18 +339,8 @@ def log_landmark_entities(landmarks, size_lookup=None) -> None:
                 static=True,
             )
 
-        # 3D Bounding Box under child entity (exactly as shown in second screenshot)
-        if not is_floor:
-            rr.log(
-                f"{path}/bounds",
-                rr.Boxes3D(
-                    centers=center,
-                    half_sizes=np.asarray(half_size, dtype=np.float32),
-                    colors=color,
-                    fill_mode="MajorWireframe",
-                ),
-                static=True,
-            )
+        # Note: Cuboids (rr.Boxes3D) explicitly removed per user requirements (WORLD_MAP_REQUIREMENTS.md).
+        # Landmarks are rendered strictly via physical 3D surface points, exact labels, and Keep-Clear Egress Cylinders.
 
 
 

@@ -435,6 +435,7 @@ ul { margin:0; padding-left:18px; font-size:12px; line-height:1.55; }
     <button class="tab-btn active" id="btn-inspector" onclick="switchTab('inspector')">Landmark Inspector</button>
     <button class="tab-btn" id="btn-qsr" onclick="switchTab('qsr')">Spatial Relations (QSR)</button>
     <button class="tab-btn hazard" id="btn-audit" onclick="switchTab('audit')">H&S Compliance Audit</button>
+    <button class="tab-btn" id="btn-video" onclick="switchTab('video')">Video Stream</button>
   </div>
 
   <div id="tab-inspector" class="tab-content">
@@ -478,6 +479,25 @@ ul { margin:0; padding-left:18px; font-size:12px; line-height:1.55; }
     <div id="subtitle">KMi Deterministic Spatial QSR Reasoning (Ibba et al., 2026)</div>
     <div id="audit-content" style="margin-top:16px;"></div>
   </div>
+
+  <div id="tab-video" class="tab-content" style="display:none;">
+    <h1>Annotated Video Stream</h1>
+    <div id="subtitle">Real-Time Detections, OCR Transcriptions & 3D Back-Projections</div>
+    <div style="margin-top:16px;">
+      <video id="preview-video-player" controls preload="metadata" style="width:100%; border-radius:6px; border:1px solid var(--line); background:#000; box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+        <source src="preview.mp4" type="video/mp4">
+        Your browser does not support HTML5 video streaming. You can open <code>preview.mp4</code> directly in your media player.
+      </video>
+    </div>
+    <div style="margin-top:14px; font-size:12px; color:var(--text); line-height:1.5;">
+      <div class="card">
+        <h3>Stream Overview</h3>
+        <p><b>Video File:</b> <a href="preview.mp4" target="_blank" style="color:var(--accent); font-weight:600;">preview.mp4</a></p>
+        <p><b>Resolution & Codec:</b> 640 &times; 480 (H.264 / AAC)</p>
+        <p><b>Visual Overlay:</b> Displays 2D bounding boxes, FastSAM instance segmentation masks, world <code>(X,Y,Z)</code> coordinate labels, depth distances, and cyan/amber dynamic multimodal badges (e.g. <code>[ROOM: VAL LULE]</code>, <code>[SIGN: EMERGENCY EXIT]</code>).</p>
+      </div>
+    </div>
+  </div>
 </aside>
 
 <script>__PLOTLY_JS__</script>
@@ -505,6 +525,9 @@ function switchTab(tab) {
   } else if (tab === 'audit') {
     document.getElementById('btn-audit').classList.add('active');
     document.getElementById('tab-audit').style.display = 'block';
+  } else if (tab === 'video') {
+    document.getElementById('btn-video').classList.add('active');
+    document.getElementById('tab-video').style.display = 'block';
   }
 }
 
