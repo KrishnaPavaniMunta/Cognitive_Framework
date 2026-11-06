@@ -81,6 +81,7 @@ def ensure_environmental_point_cloud(run_dir: Path, db_path: Path) -> tuple[np.n
         env_points = []
         env_colors = []
 
+        capture.ensure_bag_storage_files(bag_path)
         with AnyReader([bag_path], default_typestore=typestore) as reader:
             rgb_conns = [c for c in reader.connections if c.topic == "/camera/rgb/image_rect_color"]
             depth_conns = [c for c in reader.connections if c.topic == "/camera/depth_registered/image_raw"]

@@ -1184,6 +1184,7 @@ def main() -> None:
 
     # ── Read the bag once (topics are buffered by timestamp, same as the capture tool) ──
     LOG.info("[BAG] Opening bag and indexing topics ...")
+    capture.ensure_bag_storage_files(bag_path)
     typestore = get_typestore(Stores.ROS2_HUMBLE)
     with AnyReader([bag_path], default_typestore=typestore) as reader:
         available_topics = {str(c.topic): str(c.msgtype) for c in reader.connections}

@@ -657,6 +657,46 @@ def _is_intrinsics_sane(intr: CameraIntrinsics) -> bool:
     )
 
 
+def ensure_bag_storage_files(bag_path: Path) -> None:
+    """Ensure database files declared in metadata.yaml exist on disk.
+
+    When downloading ROS2 bags from Google Drive, Dropbox, or zip extractors,
+    files like `name_0.db3` often get downloaded or extracted as `name_0-001.db3`
+    or `name_0 (1).db3`. This helper detects such mismatches and renames them to
+    match metadata.yaml so rosbags AnyReader can open the bag seamlessly.
+    """
+    if not bag_path.is_dir():
+        return
+    meta_path = bag_path / "metadata.yaml"
+    if not meta_path.is_file():
+        return
+
+    try:
+        import yaml
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = yaml.safe_load(f)
+        if not isinstance(meta, dict):
+            return
+        rel_files = meta.get("rosbag2_bagfile_information", {}).get("relative_file_paths", [])
+        for rel in rel_files:
+            target = bag_path / rel
+            if not target.exists():
+                ext = target.suffix
+                stem = target.stem
+                candidates = [
+                    p for p in bag_path.iterdir()
+                    if p.is_file() and p.suffix == ext and p != target and (
+                        p.stem.startswith(stem) or stem.startswith(p.stem[:10])
+                    )
+                ]
+                if len(candidates) == 1:
+                    cand = candidates[0]
+                    cand.rename(target)
+                    print(f"[BAG] Auto-repaired bag filename: renamed '{cand.name}' -> '{target.name}'")
+    except Exception:
+        pass
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Capture synchronized RGBD + intrinsics/extrinsics + simulated detections from ROS bag."
@@ -729,6 +769,7 @@ def main() -> None:
     output_root = Path(args.output_root).resolve()
     _ensure_output_dir(output_root, overwrite=bool(args.overwrite))
 
+    ensure_bag_storage_files(bag_path)
     typestore = get_typestore(Stores.ROS2_HUMBLE)
     with AnyReader([bag_path], default_typestore=typestore) as reader:
         available_topics = {str(c.topic): str(c.msgtype) for c in reader.connections}
