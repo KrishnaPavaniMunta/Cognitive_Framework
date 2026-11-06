@@ -42,11 +42,14 @@ BASE_DIR = Path(__file__).resolve().parent
 CODEBASE_DIR = BASE_DIR.parent
 PROJECT_ROOT = CODEBASE_DIR.parent
 OBJECT_DETECTION_DIR = CODEBASE_DIR / "07_object_detection"
-ONTOLOGY_DIR = CODEBASE_DIR / "09_ontology"
+ROSBAG_DIR = CODEBASE_DIR / "08_rosbag_processing"
+ONTOLOGY_DIR = CODEBASE_DIR / "10_ontology"
 DEFAULT_ONTOLOGY = ONTOLOGY_DIR / "ontology.rdf"
 
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
+if str(ROSBAG_DIR) not in sys.path:
+    sys.path.insert(0, str(ROSBAG_DIR))
 if str(OBJECT_DETECTION_DIR) not in sys.path:
     sys.path.insert(0, str(OBJECT_DETECTION_DIR))
 if str(ONTOLOGY_DIR) not in sys.path:

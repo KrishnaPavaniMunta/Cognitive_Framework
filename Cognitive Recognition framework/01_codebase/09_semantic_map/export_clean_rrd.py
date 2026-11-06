@@ -26,11 +26,17 @@ import rerun as rr
 BASE_DIR = Path(__file__).resolve().parent
 CODEBASE_DIR = BASE_DIR.parent
 OBJECT_DETECTION_DIR = CODEBASE_DIR / "07_object_detection"
+ROSBAG_DIR = CODEBASE_DIR / "08_rosbag_processing"
+ONTOLOGY_DIR = CODEBASE_DIR / "10_ontology"
 
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
+if str(ROSBAG_DIR) not in sys.path:
+    sys.path.insert(0, str(ROSBAG_DIR))
 if str(OBJECT_DETECTION_DIR) not in sys.path:
     sys.path.insert(0, str(OBJECT_DETECTION_DIR))
+if str(ONTOLOGY_DIR) not in sys.path:
+    sys.path.insert(0, str(ONTOLOGY_DIR))
 
 from rerun_logger import class_color, landmark_metadata, matrix_to_translation_quaternion, stable_landmark_path
 

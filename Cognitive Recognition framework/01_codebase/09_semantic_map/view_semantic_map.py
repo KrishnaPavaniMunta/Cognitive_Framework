@@ -26,7 +26,7 @@ from matplotlib import colormaps
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent.parent
 DEFAULT_OUT_ROOT = PROJECT_ROOT / "04_outputs_runs_and_logs" / "outputs" / "semantic_maps"
-ONTOLOGY_DIR = PROJECT_ROOT / "01_codebase" / "09_ontology"
+ONTOLOGY_DIR = PROJECT_ROOT / "01_codebase" / "10_ontology"
 DEFAULT_ONTOLOGY = ONTOLOGY_DIR / "ontology.rdf"
 CURRENT_HTML_NAME = "semantic_map_ontology.html"
 LEGACY_HTML_NAME = "semantic_map_ontology_viewer.html"

@@ -16,6 +16,9 @@ from common_sense_filter import apply_common_sense_rules
 from bin_classifier import refine_bin_detections
 from dino_prompts import DINO_FALLBACK
 from dino_fallback import run_dino_fallback
+ROSBAG_DIR = Path(__file__).resolve().parent.parent / "08_rosbag_processing"
+if str(ROSBAG_DIR) not in sys.path:
+    sys.path.insert(0, str(ROSBAG_DIR))
 from rgbd_bag_processing import process_rgbd_bag
 from rgbd_3d_filter import apply_depth_size_filter as apply_rgbd_depth_size_filter
 
@@ -29,7 +32,7 @@ V2_PATH = Path(r"D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition
 V3_PATH = Path(r"D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework\03_models_and_weights\models\yolo_trained_v3.pt")
 OUT_DIR = Path(r"D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework\04_outputs_runs_and_logs\OD_Outputs")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-DIMENSIONS_CONFIG_PATH = PROJECT_ROOT / "01_codebase" / "09_ontology" / "ontology.rdf"
+DIMENSIONS_CONFIG_PATH = PROJECT_ROOT / "01_codebase" / "10_ontology" / "ontology.rdf"
 
 # ── Hyperparameters ────────────────────────────────────────────────────────────
 DEFAULT_CONF_THRESH = 0.25

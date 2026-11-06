@@ -8,7 +8,7 @@ cd "D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework"
 
 # 2. Build Semantic Map with 3D Multi-View Consensus + Rerun Export
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
-  ".\01_codebase\08_semantic_map\build_semantic_map_from_bag.py" `
+  ".\01_codebase\09_semantic_map\build_semantic_map_from_bag.py" `
   --bag ".\02_datasets\kmi\rgbd_clean_20260925_134830-20261007T134658Z-1-002" `
   --frame-stride 3 `
   --merge-radius-m 0.5 `
@@ -23,6 +23,6 @@ cd "D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework"
 
 # 4. View in Interactive Web Browser (Plotly HTML)
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
-  ".\01_codebase\08_semantic_map\view_semantic_map.py" `
+  ".\01_codebase\09_semantic_map\view_semantic_map.py" `
   --db ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260925_134830\world_map.db" `
   --html

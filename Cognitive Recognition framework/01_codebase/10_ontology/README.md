@@ -33,7 +33,7 @@ ontology_knowledge.py
         |                             |
         v                             v
 Physical-size filtering          Semantic map viewer
-01_codebase/07_object_detection  01_codebase/08_semantic_map
+01_codebase/07_object_detection  01_codebase/09_semantic_map
         |                             |
         v                             v
 Validated detections             Ontology-enriched landmarks
@@ -172,7 +172,7 @@ cd "D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework"
 Open this file directly:
 
 ```text
-01_codebase/09_ontology/ontology.rdf
+01_codebase/10_ontology/ontology.rdf
 ```
 
 Use Protege to inspect classes, subclass relationships, object properties, datatype properties, annotation properties, and physical-dimension annotations.
@@ -181,7 +181,7 @@ Use Protege to inspect classes, subclass relationships, object properties, datat
 
 ```powershell
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
-  -c "import sys; sys.path.insert(0, r'.\01_codebase\09_ontology'); from ontology_knowledge import OntologyKnowledgeBase; kb=OntologyKnowledgeBase(); print('triples=', len(kb.graph)); [print(name, kb.resolve(name)['resolution'], kb.resolve(name)['resolved_name'], kb.resolve(name)['dimensions']) for name in ('door', 'utility_trolley', 'power_socket', 'general_bin', 'medical_tray', 'not_a_real_class')]"
+  -c "import sys; sys.path.insert(0, r'.\01_codebase\10_ontology'); from ontology_knowledge import OntologyKnowledgeBase; kb=OntologyKnowledgeBase(); print('triples=', len(kb.graph)); [print(name, kb.resolve(name)['resolution'], kb.resolve(name)['resolved_name'], kb.resolve(name)['dimensions']) for name in ('door', 'utility_trolley', 'power_socket', 'general_bin', 'medical_tray', 'not_a_real_class')]"
 ```
 
 This verifies that the ontology loads, bridge classes are added, aliases resolve correctly, and representative dimensions are available.
@@ -190,7 +190,7 @@ This verifies that the ontology loads, bridge classes are added, aliases resolve
 
 ```powershell
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
-  ".\01_codebase\09_ontology\semantic_map_to_rdf.py" `
+  ".\01_codebase\10_ontology\semantic_map_to_rdf.py" `
   --db ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.db" `
   --out ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\semantic_map.rdf"
 ```
@@ -199,7 +199,7 @@ To export Turtle instead of RDF/XML:
 
 ```powershell
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
-  ".\01_codebase\09_ontology\semantic_map_to_rdf.py" `
+  ".\01_codebase\10_ontology\semantic_map_to_rdf.py" `
   --format turtle
 ```
 
@@ -207,7 +207,7 @@ To export Turtle instead of RDF/XML:
 
 ```powershell
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
-  ".\01_codebase\08_semantic_map\view_semantic_map.py" `
+  ".\01_codebase\09_semantic_map\view_semantic_map.py" `
   --db ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.db" `
   --html
 ```

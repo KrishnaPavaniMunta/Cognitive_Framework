@@ -1,7 +1,7 @@
 """
 Bridge: semantic map SQLite landmarks -> populated RDF/OWL individuals aligned to ontology.rdf.
 
-For every landmark in a `semantic_map.db` (produced by 08_semantic_map/build_semantic_map_from_bag.py)
+For every landmark in a `world_map.db` (produced by 09_semantic_map/build_semantic_map_from_bag.py)
 this script asserts:
   - an individual typed with the matching ontology class (falls back to PhysicalObject)
   - a Location individual carrying its world-frame X/Y/Z (bridge extension datatype properties)

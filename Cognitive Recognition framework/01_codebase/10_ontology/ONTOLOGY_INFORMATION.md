@@ -4,7 +4,7 @@
 
 The authoritative ontology file is:
 
-`01_codebase/09_ontology/ontology.rdf`
+`01_codebase/10_ontology/ontology.rdf`
 
 It is an RDF/XML OWL ontology used by the object-detection, physical-size filtering, semantic-map, RDF-export, and viewer components.
 
@@ -485,7 +485,7 @@ Use Protégé to inspect and edit:
 
 Open:
 
-`01_codebase/09_ontology/ontology.rdf`
+`01_codebase/10_ontology/ontology.rdf`
 
 The current physical dimensions appear under each class's **Annotations** section as `physicalDimensions` JSON.
 
@@ -495,7 +495,7 @@ The Plotly viewer is generated with:
 
 ```powershell
 & ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
-  ".\01_codebase\08_semantic_map\view_semantic_map.py" `
+  ".\01_codebase\09_semantic_map\view_semantic_map.py" `
   --db ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260521_142555\world_map.db" `
   --html
 ```
@@ -534,7 +534,7 @@ before writing a new current `world_map.rrd`. This prevents silent deletion of p
 - [ontology.rdf](ontology.rdf) - authoritative RDF/XML ontology
 - [ontology_knowledge.py](ontology_knowledge.py) - shared resolver and normalized knowledge extraction
 - [semantic_map_to_rdf.py](semantic_map_to_rdf.py) - semantic-map RDF exporter
-- [../08_semantic_map/view_semantic_map.py](../08_semantic_map/view_semantic_map.py) - Matplotlib, HTML, and Rerun viewer entry point
-- [../08_semantic_map/semantic_map_html.py](../08_semantic_map/semantic_map_html.py) - Plotly HTML inspector
-- [../08_semantic_map/rerun_logger.py](../08_semantic_map/rerun_logger.py) - Rerun scene and landmark metadata logging
+- [../09_semantic_map/view_semantic_map.py](../09_semantic_map/view_semantic_map.py) - Matplotlib, HTML, and Rerun viewer entry point
+- [../09_semantic_map/semantic_map_html.py](../09_semantic_map/semantic_map_html.py) - Plotly HTML inspector
+- [../09_semantic_map/rerun_logger.py](../09_semantic_map/rerun_logger.py) - Rerun scene and landmark metadata logging
 - [../../10_Testing/test_ontology_semantic_map_viewer.py](../../10_Testing/test_ontology_semantic_map_viewer.py) - focused ontology/viewer tests

@@ -9,7 +9,7 @@ This guide provides the exact commands to run the 3D Cognitive Recognition frame
 Run this command from the **project root folder**:
 ```powershell
 .\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe `
-  01_codebase\08_semantic_map\build_semantic_map_from_bag.py `
+  01_codebase\09_semantic_map\build_semantic_map_from_bag.py `
   --bag "02_datasets\kmi\rgbd_pose_20261103_143812" `
   --frame-stride 4 `
   --min-consensus-hits 3
@@ -25,7 +25,7 @@ Run this command from the **project root folder**:
 If you already processed a bag and only want to replay the geometry, camera trajectory, and point cloud into Rerun without re-running YOLO/SAM/DINO models:
 ```powershell
 .\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe `
-  01_codebase\08_semantic_map\build_semantic_map_from_bag.py `
+  01_codebase\09_semantic_map\build_semantic_map_from_bag.py `
   --bag "02_datasets\kmi\rgbd_pose_20261103_143812" `
   --rerun-only
 ```
@@ -49,7 +49,7 @@ Open the complete canonical 3D Digital Twin (`world_map.rrd`):
 Open the interactive 3D Web Viewer with Three.js egress cylinders and video tab:
 ```powershell
 .\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe `
-  01_codebase\08_semantic_map\view_semantic_map.py `
+  01_codebase\09_semantic_map\view_semantic_map.py `
   --db 04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_pose_20261103_143812\world_map.db `
   --html
 ```
@@ -66,7 +66,7 @@ Start-Process "04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_pose_20261103
 To re-export the lightweight canonical `world_map.rrd` directly from any existing `world_map.db`:
 ```powershell
 .\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe `
-  01_codebase\08_semantic_map\export_clean_rrd.py `
+  01_codebase\09_semantic_map\export_clean_rrd.py `
   --db 04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_pose_20261103_143812\world_map.db
 ```
 

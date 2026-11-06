@@ -9,10 +9,11 @@ import unittest
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SEMANTIC_MAP_DIR = PROJECT_ROOT / "01_codebase" / "08_semantic_map"
-ONTOLOGY_DIR = PROJECT_ROOT / "01_codebase" / "09_ontology"
+SEMANTIC_MAP_DIR = PROJECT_ROOT / "01_codebase" / "09_semantic_map"
+ONTOLOGY_DIR = PROJECT_ROOT / "01_codebase" / "10_ontology"
+ROSBAG_DIR = PROJECT_ROOT / "01_codebase" / "08_rosbag_processing"
 OBJECT_DETECTION_DIR = PROJECT_ROOT / "01_codebase" / "07_object_detection"
-for module_dir in (SEMANTIC_MAP_DIR, ONTOLOGY_DIR, OBJECT_DETECTION_DIR):
+for module_dir in (SEMANTIC_MAP_DIR, ONTOLOGY_DIR, ROSBAG_DIR, OBJECT_DETECTION_DIR):
     if str(module_dir) not in sys.path:
         sys.path.insert(0, str(module_dir))
 

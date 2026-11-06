@@ -30,7 +30,7 @@ LOG = logging.getLogger("two_tier_classifier")
 
 BASE_DIR = Path(__file__).resolve().parent
 CODEBASE_DIR = BASE_DIR.parent
-ONTOLOGY_DIR = CODEBASE_DIR / "09_ontology"
+ONTOLOGY_DIR = CODEBASE_DIR / "10_ontology"
 DEFAULT_ONTOLOGY = ONTOLOGY_DIR / "ontology.rdf"
 
 CO = Namespace("http://www.semanticweb.org/chevi/ontologies/2026/5/52-classes-ontology#")
