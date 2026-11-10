@@ -302,8 +302,12 @@ class MultimodalSignDetector:
             box_w = max(1.0, x2 - x1)
             box_h = max(1.0, y2 - y1)
 
+            # Anchor 0: Primary Exit Sign detected by YOLO/DINO
+            if "exit" in cname or cname == "exit_sign":
+                rois.append((x1, y1, x2, y2, "exit_sign"))
+
             # Anchor 1: Doorway / Door
-            if "door" in cname:
+            elif "door" in cname:
                 # Zone A: Directly Above Door Header (Exit / Directional signs)
                 # Extends 35% of door height above the door top
                 hx1 = max(0.0, x1 - 0.10 * box_w)
@@ -455,8 +459,8 @@ class MultimodalSignDetector:
                             best_score = score
                             matched_cat = open_name
 
-                # 3. If unclassified, but contains alphanumeric words (e.g. general room name, numbers)
-                if matched_cat is None and alnum_count >= 2:
+                # 3. If unclassified, require meaningful text (>= 3 chars) to avoid 1-2 letter noise (like 'CL') becoming a room sign
+                if matched_cat is None and alnum_count >= 3:
                     matched_cat = "room_sign" if len(raw_clean.split()) <= 4 else "notice_board"
                     best_score = float(ocr_conf)
 
@@ -681,7 +685,10 @@ class MultimodalSignDetector:
                 continue
 
             # Format dynamic badge label with transcribed text
-            if text_content and text_content.strip():
+            if cat == "exit_sign":
+                badge_label = "[SIGN: EXIT]"
+                display_name = spec["display_name"]
+            elif text_content and text_content.strip():
                 clean_badge_text = re.sub(r"\s+", " ", text_content.strip())
                 if len(clean_badge_text) > 18:
                     clean_badge_text = clean_badge_text[:17] + "…"
