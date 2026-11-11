@@ -917,8 +917,6 @@ def annotate(frame: np.ndarray, frame_index: int, timestamp_ns: int, pins: list[
         instance_label = f" {pin['instance_id']}" if pin.get("instance_id") is not None else ""
         if is_floor:
             head = f"Floor {float(pin['confidence'] or 0):.0%}"
-        elif pin.get("class_name") == "exit_sign":
-            head = f"[SIGN: EXIT]{instance_label} {float(pin['confidence'] or 0):.0%}"
         elif pin.get("display_badge"):
             head = f"{pin['display_badge']}{instance_label} {float(pin['confidence'] or 0):.0%}"
         else:
@@ -1457,18 +1455,6 @@ def main() -> None:
                         cadence=args.sign_cadence,
                     )
                     for s in sign_results:
-                        # Protect exit signs: never overlay a room_sign on an exit_sign
-                        overlapping_exit = any(
-                            det.get("class_label") == "exit_sign"
-                            and (
-                                max(0.0, min(s.bbox_xyxy[2], det["bbox_xyxy"][2]) - max(s.bbox_xyxy[0], det["bbox_xyxy"][0]))
-                                * max(0.0, min(s.bbox_xyxy[3], det["bbox_xyxy"][3]) - max(s.bbox_xyxy[1], det["bbox_xyxy"][1]))
-                            ) / max(1.0, (s.bbox_xyxy[2] - s.bbox_xyxy[0]) * (s.bbox_xyxy[3] - s.bbox_xyxy[1])) > 0.20
-                            for det in detections
-                        )
-                        if overlapping_exit and s.canonical_name != "exit_sign":
-                            continue
-
                         detections.append({
                             "bbox_xyxy": s.bbox_xyxy,
                             "class_label": s.canonical_name,
@@ -1477,11 +1463,6 @@ def main() -> None:
                             "display_badge": s.badge_label,
                             "text_transcription": s.text_content,
                         })
-
-                    # Ensure all exit_sign detections always have the canonical [SIGN: EXIT] display badge
-                    for det in detections:
-                        if det.get("class_label") == "exit_sign" and not det.get("display_badge"):
-                            det["display_badge"] = "[SIGN: EXIT]"
                 except Exception as exc:
                     LOG.warning("[SIGN DETECTOR] Sign detection error at frame %d: %s", processed_counter, exc)
 
