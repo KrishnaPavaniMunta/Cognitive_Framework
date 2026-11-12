@@ -640,11 +640,13 @@ class SemanticMapDB:
             # Progressive 3D physical dimension refinement from multi-view depth
             if rw is not None and rh is not None and rw > 0.02 and rh > 0.02:
                 cur_w = lm.get("measured_width")
-                if cur_w is not None and cur_w > 0:
-                    mc = lm.get("measured_count", n)
-                    lm["measured_width"] = (lm["measured_width"] * mc + rw) / (mc + 1)
-                    lm["measured_depth"] = (lm["measured_depth"] * mc + (rd or rw)) / (mc + 1)
-                    lm["measured_height"] = (lm["measured_height"] * mc + rh) / (mc + 1)
+                cur_h = lm.get("measured_height")
+                if cur_w is not None and cur_w > 0 and cur_h is not None and cur_h > 0:
+                    mc = max(1, int(lm.get("measured_count") or n))
+                    cur_d = lm.get("measured_depth") or cur_w
+                    lm["measured_width"] = (cur_w * mc + rw) / (mc + 1)
+                    lm["measured_depth"] = (cur_d * mc + (rd or rw)) / (mc + 1)
+                    lm["measured_height"] = (cur_h * mc + rh) / (mc + 1)
                     lm["measured_count"] = mc + 1
                 else:
                     lm["measured_width"] = rw
@@ -681,6 +683,7 @@ class SemanticMapDB:
             default=0,
         )
         pts = record.get("surface_points")
+        has_valid_dims = bool(rw and rh and rw > 0.02 and rh > 0.02)
         self._landmarks[lid] = {
             "class_name": det_class,
             "instance_id": instance_id,
@@ -691,10 +694,10 @@ class SemanticMapDB:
             "max_confidence": conf,
             "first_seen_ns": record["timestamp_ns"],
             "last_seen_ns": record["timestamp_ns"],
-            "measured_width": rw if (rw and rw > 0.02) else None,
-            "measured_depth": rd if (rd and rd > 0.02) else (rw if (rw and rw > 0.02) else None),
-            "measured_height": rh if (rh and rh > 0.02) else None,
-            "measured_count": 1 if (rw and rh and rw > 0.02 and rh > 0.02) else 0,
+            "measured_width": rw if has_valid_dims else None,
+            "measured_depth": (rd if (rd and rd > 0.02) else rw) if has_valid_dims else None,
+            "measured_height": rh if has_valid_dims else None,
+            "measured_count": 1 if has_valid_dims else 0,
             "surface_points": pts if pts is not None else None,
             "class_votes": {det_class: max(0.01, conf)},
             "consensus_score": 1.0,
@@ -1033,14 +1036,8 @@ def parse_args() -> argparse.Namespace:
                    help="Use raw depth instead of edge-preserving bilateral smoothing")
     p.add_argument("--ontology", default=str(DEFAULT_ONTOLOGY),
                    help="RDF/OWL ontology embedded as landmark metadata in Rerun")
-    p.add_argument("--enable-residual-discovery", action="store_true", default=False,
-                   help="Run residual 3D DBSCAN clustering and two-tier cognition on keyframes")
-    p.add_argument("--no-residual-discovery", action="store_false", dest="enable_residual_discovery",
-                   help="Disable residual 3D clustering")
-    p.add_argument("--residual-interval", type=int, default=35,
-                   help="Run residual clustering every Nth processed frame (default: 35)")
     p.add_argument("--enable-sign-detection", action="store_true", default=True,
-                   help="Enable OCR + CLIP multimodal safety signage detector")
+                   help="Enable OCR safety signage detector")
     p.add_argument("--no-sign-detection", action="store_false", dest="enable_sign_detection",
                    help="Disable multimodal sign detector")
     p.add_argument("--scan-topic", default="/scan",
@@ -1049,8 +1046,8 @@ def parse_args() -> argparse.Namespace:
                    help="Ingest and project 2D LiDAR scans if present")
     p.add_argument("--no-lidar", action="store_false", dest="enable_lidar",
                    help="Disable 2D LiDAR ingestion")
-    p.add_argument("--sign-cadence", type=int, default=1,
-                   help="Cadence in frames for periodic full-scene text sweep (default: 1)")
+    p.add_argument("--sign-cadence", type=int, default=20,
+                   help="Cadence in frames for periodic full-scene text sweep (default: 20)")
     p.add_argument("--verbose", action="store_true", help="Print DEBUG lines to the console too")
     args = p.parse_args()
     if args.rerun_only:
@@ -1253,20 +1250,6 @@ def main() -> None:
         except Exception as exc:
             LOG.warning("[FastSAM] Could not load FastSAM segmenter: %s. Continuing in bounding box mode.", exc)
             segmenter = None
-
-    cognition_engine = None
-    residual_clusterer = None
-    if getattr(args, "enable_residual_discovery", False) and not args.rerun_only:
-        try:
-            from spatial_clustering import ResidualSpatialClustering
-            from two_tier_classifier import TwoTierCognitionEngine
-            cognition_engine = TwoTierCognitionEngine(
-                ontology_path=Path(args.ontology).resolve(),
-                device=args.detector_device,
-            )
-            LOG.info("[DISCOVERY] Two-Tier Residual Cognition active (interval: %d frames)", args.residual_interval)
-        except Exception as exc:
-            LOG.warning("[DISCOVERY] Could not initialize residual cognition: %s", exc)
 
     sign_detector = None
     if getattr(args, "enable_sign_detection", True) and not args.rerun_only:
@@ -1645,69 +1628,6 @@ def main() -> None:
                 _, pin["instance_id"] = db.add_observation(pin)
                 stats["pins_created"] += 1
                 pins.append(pin)
-
-            # Residual 3D DBSCAN Clustering & Two-Tier Cognition (Keyframes)
-            if (cognition_engine is not None and pose_matrix is not None
-                    and (processed_counter % max(1, args.residual_interval) == 0)):
-                if residual_clusterer is None:
-                    residual_clusterer = ResidualSpatialClustering(intr)
-
-                known_regions = []
-                for det_idx, det in enumerate(detections):
-                    if det_idx < len(masks) and masks[det_idx][0] is not None:
-                        known_regions.append(masks[det_idx][0])
-                    else:
-                        known_regions.append(det["bbox_xyxy"])
-
-                try:
-                    res_clusters = residual_clusterer.extract_residual_clusters(
-                        rgb_img, depth_mm, known_regions, pose_matrix=pose_matrix
-                    )
-                    for cluster in res_clusters:
-                        c_res = cognition_engine.classify_crop(cluster.crop_rgb)
-                        if not c_res or "unidentified" in str(c_res.class_name).lower() or str(c_res.class_name).lower() == "obstacle":
-                            continue
-                        if c_res.is_novel:
-                            cognition_engine.ingest_novel_concept(c_res.class_name, dimensions_m=cluster.dimensions_m)
-
-                        c_pin = {
-                            "frame_index": processed_counter,
-                            "timestamp_ns": rgb_item.timestamp_ns,
-                            "class_name": c_res.class_name,
-                            "source_class_name": f"[{c_res.tier}] {c_res.class_name}",
-                            "confidence": c_res.confidence,
-                            "bbox_xyxy": list(cluster.bbox_2d),
-                            "u": (cluster.bbox_2d[0] + cluster.bbox_2d[2]) / 2.0,
-                            "v": (cluster.bbox_2d[1] + cluster.bbox_2d[3]) / 2.0,
-                            "depth_m": cluster.centroid_cam[2],
-                            "cam_X": cluster.centroid_cam[0],
-                            "cam_Y": cluster.centroid_cam[1],
-                            "cam_Z": cluster.centroid_cam[2],
-                            "world_X": cluster.centroid_world[0],
-                            "world_Y": cluster.centroid_world[1],
-                            "world_Z": cluster.centroid_world[2],
-                            "world_frame": world_frame,
-                            "instance_id": None,
-                            "extrinsics_source": extrinsics_source,
-                            "extrinsics_status": extrinsics_status,
-                            "reject_reason": "",
-                            "mask": None,
-                            "eroded_mask": None,
-                            "surface_points": cluster.points_world,
-                            "real_width": cluster.dimensions_m[0],
-                            "real_depth": cluster.dimensions_m[1],
-                            "real_height": cluster.dimensions_m[2],
-                        }
-                        _, c_pin["instance_id"] = db.add_observation(c_pin)
-                        pins.append(c_pin)
-                        stats["pins_created"] += 1
-                        stats["residual_discovered"] = stats.get("residual_discovered", 0) + 1
-                        LOG.debug("      [RESIDUAL] Discovered %s at (%.2f, %.2f, %.2f) dims=%.2fx%.2fx%.2fm",
-                                  c_res.class_name, cluster.centroid_world[0], cluster.centroid_world[1], cluster.centroid_world[2],
-                                  cluster.dimensions_m[0], cluster.dimensions_m[1], cluster.dimensions_m[2])
-                except Exception as exc:
-                    LOG.debug("[DISCOVERY] Error in residual clustering: %s", exc)
-                db.conn.commit()
 
             annotated = None
             if preview_cap is not None:

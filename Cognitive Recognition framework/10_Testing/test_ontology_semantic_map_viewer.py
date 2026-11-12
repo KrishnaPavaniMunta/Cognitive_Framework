@@ -345,6 +345,42 @@ class SemanticMapViewerTests(unittest.TestCase):
             self.assertAlmostEqual(reloaded_lm["consensus_score"], (0.85 + 0.90) / (0.55 + 0.85 + 0.90), places=2)
             db_reloaded.close()
 
+    def test_merge_partial_measured_dimensions_does_not_raise(self) -> None:
+        from build_semantic_map_from_bag import SemanticMapDB
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "world_map.db"
+            db = SemanticMapDB(db_path, merge_radius_m=0.50)
+
+            # Initial observation has real_width > 0.02 but real_height <= 0.02 (partial/degenerate height)
+            obs_partial = {
+                "frame_index": 2700, "timestamp_ns": 1000,
+                "source_class_name": "chair", "class_name": "chair",
+                "confidence": 0.95, "u": 389.0, "v": 287.0, "depth_m": 0.88,
+                "cam_X": 0.10, "cam_Y": 0.05, "cam_Z": 0.88,
+                "world_X": 16.89, "world_Y": 9.95, "world_Z": 0.38,
+                "world_frame": "odom", "extrinsics_source": "tf_chain", "extrinsics_status": "ok",
+                "real_width": 0.0505, "real_depth": 0.0051, "real_height": 0.0185,
+            }
+            lid1, _ = db.add_observation(obs_partial)
+            self.assertIsNotNone(lid1)
+
+            # Second observation at same spot has full valid 3D dimensions
+            obs_full = {
+                "frame_index": 3466, "timestamp_ns": 2000,
+                "source_class_name": "chair", "class_name": "chair",
+                "confidence": 0.51, "u": 390.0, "v": 285.0, "depth_m": 0.90,
+                "cam_X": 0.14, "cam_Y": -0.45, "cam_Z": 0.90,
+                "world_X": 16.92, "world_Y": 9.93, "world_Z": 0.42,
+                "world_frame": "odom", "extrinsics_source": "tf_chain", "extrinsics_status": "ok",
+                "real_width": 0.65, "real_depth": 0.60, "real_height": 0.85,
+            }
+            lid2, _ = db.add_observation(obs_full)
+            self.assertEqual(lid1, lid2)
+            self.assertAlmostEqual(db.landmarks[lid1]["measured_width"], 0.65, places=2)
+            self.assertAlmostEqual(db.landmarks[lid1]["measured_height"], 0.85, places=2)
+            db.close()
+
     def test_floor_semantic_labeling_and_navigable_zone(self) -> None:
         # 1. AnnotationManager reserves ID 1 for 'Floor' and names it 'Floor' without any instance ID
         mgr = AnnotationManager()

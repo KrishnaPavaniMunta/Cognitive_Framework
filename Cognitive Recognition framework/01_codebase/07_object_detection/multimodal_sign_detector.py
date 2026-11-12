@@ -47,8 +47,8 @@ HOSPITAL_SIGN_TAXONOMY: dict[str, dict[str, Any]] = {
             "exit", "emergency exit", "fire exit", "way out", "salida", "sortie",
             "ausgang", "emergency", "escape route"
         ],
-        "min_elevation_m": 1.60,
-        "max_elevation_m": 2.90,
+        "min_elevation_m": 1.00,
+        "max_elevation_m": 2.80,
     },
     "sign_fire_extinguisher": {
         "canonical_name": "sign_fire_extinguisher",
@@ -112,67 +112,6 @@ HOSPITAL_SIGN_TAXONOMY: dict[str, dict[str, Any]] = {
         ],
         "min_elevation_m": 0.80,
         "max_elevation_m": 2.30,
-    },
-}
-
-# ── Open-Vocabulary Placard & General Hospital Signage Taxonomy ─────────────────
-OPEN_SIGN_TAXONOMY: dict[str, dict[str, Any]] = {
-    "room_sign": {
-        "canonical_name": "room_sign",
-        "display_name": "Room / Ward Sign",
-        "badge_prefix": "ROOM",
-        "color_bgr": (220, 160, 40),   # Cyan/Teal
-        "clip_prompt": "a hospital room nameplate, ward door sign, department identification plaque, or office plaque",
-        "keywords": [
-            "room", "ward", "icu", "clinic", "office", "dept", "department",
-            "theatre", "operating", "pharmacy", "radiology", "triage", "restroom",
-            "toilet", "washroom", "wc", "lab", "laboratory", "consultation",
-            "reception", "waiting", "doctor", "nurse", "station", "emergency", "cardiology",
-            "radiotherapy", "maternity", "pediatric", "oncology"
-        ],
-        "min_elevation_m": 0.60,
-        "max_elevation_m": 2.70,
-    },
-    "notice_board": {
-        "canonical_name": "notice_board",
-        "display_name": "Hospital Notice Board",
-        "badge_prefix": "NOTICE",
-        "color_bgr": (180, 120, 20),   # Deep cyan
-        "clip_prompt": "a hospital advisory notice board, staff instruction plaque, hospital policy sign, or visitor notice",
-        "keywords": [
-            "notice", "attention", "information", "info", "warning", "instruction",
-            "visitor", "visiting", "hours", "clean hands", "wash hands", "mask",
-            "protocol", "policy", "sanitise", "sanitize", "hygiene", "ppe", "staff only",
-            "silence", "quiet", "no smoking", "cctv in operation"
-        ],
-        "min_elevation_m": 0.60,
-        "max_elevation_m": 2.60,
-    },
-    "directional_sign": {
-        "canonical_name": "directional_sign",
-        "display_name": "Directional Wayfinding Sign",
-        "badge_prefix": "WAYFINDING",
-        "color_bgr": (200, 180, 50),   # Light cyan
-        "clip_prompt": "a hospital directional wayfinding corridor sign with arrows indicating departments",
-        "keywords": [
-            "way", "arrow", "straight", "left", "right", "ahead", "level", "floor",
-            "stairs", "lift", "elevator", "block", "wing", "zone", "corridor", "route"
-        ],
-        "min_elevation_m": 0.80,
-        "max_elevation_m": 2.90,
-    },
-    "safety_sign": {
-        "canonical_name": "safety_sign",
-        "display_name": "Safety Notice Placard",
-        "badge_prefix": "SAFETY",
-        "color_bgr": (50, 180, 220),   # Amber
-        "clip_prompt": "a hospital safety instructions placard, first aid equipment sign, or medical safety label",
-        "keywords": [
-            "safety", "first aid", "eyewash", "aed", "defibrillator", "emergency stop",
-            "safety shower", "resuscitation", "fire action", "emergency call"
-        ],
-        "min_elevation_m": 0.60,
-        "max_elevation_m": 2.60,
     },
 }
 
@@ -243,8 +182,8 @@ def _box_iou(box1: list[float] | tuple[float, ...], box2: list[float] | tuple[fl
 
 class MultimodalSignDetector:
     """
-    High-accuracy hospital signage & text recognition engine (EasyOCR CRAFT + CRNN).
-    Extracts text placards, door room signs, notice boards, and ISO safety signs.
+    High-accuracy hospital signage & pictogram recognition engine.
+    Integrates EasyOCR (CRAFT + CRNN) and OpenAI CLIP (ViT-B/32).
     """
 
     def __init__(
@@ -259,9 +198,9 @@ class MultimodalSignDetector:
         else:
             self.device = device
 
-        LOG.info("[SIGN DETECTOR] Initializing Pure Text Sign Detector (EasyOCR) on device: %s", self.device)
+        LOG.info("[SIGN DETECTOR] Initializing Multimodal Sign Detector on device: %s", self.device)
 
-        # 1. EasyOCR Engine (CRAFT Text Detection + CRNN Recognition)
+        # 1. EasyOCR Engine
         self.reader = None
         if easyocr is not None:
             try:
@@ -269,15 +208,49 @@ class MultimodalSignDetector:
                 self.reader = easyocr.Reader(["en"], gpu=(self.device == "cuda"))
                 LOG.info("[SIGN DETECTOR] EasyOCR ready.")
             except Exception as exc:
-                LOG.warning("[SIGN DETECTOR] EasyOCR init failed: %s", exc)
+                LOG.warning("[SIGN DETECTOR] EasyOCR init failed: %s (falling back to CLIP only)", exc)
 
-        # 2. Categories
+        # 2. CLIP Engine
+        self.clip_processor = clip_processor
+        self.clip_model = clip_model
+        if self.clip_model is None or self.clip_processor is None:
+            if CLIPModel is not None and CLIPProcessor is not None:
+                try:
+                    LOG.info("[SIGN DETECTOR] Loading CLIP model (openai/clip-vit-base-patch32) on %s...", self.device)
+                    self.clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+                    self.clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(self.device).eval()
+                    LOG.info("[SIGN DETECTOR] CLIP model ready.")
+                except Exception as exc:
+                    LOG.warning("[SIGN DETECTOR] CLIP model init failed: %s", exc)
+
+        # 3. Precompute CLIP text embeddings for signs & negative clutter
         self.sign_categories = list(HOSPITAL_SIGN_TAXONOMY.keys())
-        self.open_categories = list(OPEN_SIGN_TAXONOMY.keys())
+        self.sign_prompts = [HOSPITAL_SIGN_TAXONOMY[k]["clip_prompt"] for k in self.sign_categories]
+        self.negative_prompts = NEGATIVE_PROMPTS
+        self.all_prompts = self.sign_prompts + self.negative_prompts
 
-        # 3. 3D Spatial Landmark Tracking (0.40m deduplication radius)
+        self.prompt_embeddings: torch.Tensor | None = None
+        self._init_clip_embeddings()
+
+        # 4. 3D Spatial Landmark Tracking (0.40m deduplication radius)
         self.tracked_signs: list[dict[str, Any]] = []
         self._next_sign_id = 1
+
+    def _init_clip_embeddings(self) -> None:
+        """Precomputes and normalizes text embeddings for all target safety signs."""
+        if self.clip_model is None or self.clip_processor is None:
+            return
+
+        try:
+            inputs = self.clip_processor(text=self.all_prompts, return_tensors="pt", padding=True).to(self.device)
+            with torch.no_grad():
+                out = self.clip_model.get_text_features(**inputs)
+                text_features = out.pooler_output if hasattr(out, "pooler_output") else out
+                self.prompt_embeddings = text_features / text_features.norm(dim=-1, keepdim=True)
+            LOG.info("[SIGN DETECTOR] Precomputed CLIP embeddings for %d safety & negative prompts.", len(self.all_prompts))
+        except Exception as exc:
+            LOG.warning("[SIGN DETECTOR] Could not precompute CLIP text embeddings: %s", exc)
+            self.prompt_embeddings = None
 
     # ── RoI Generation ──────────────────────────────────────────────────────────
 
@@ -393,11 +366,10 @@ class MultimodalSignDetector:
     def generate_periodic_text_rois(
         self,
         rgb_bgr: np.ndarray,
-        min_box_size: int = 8,
+        min_box_size: int = 15,
     ) -> list[tuple[float, float, float, float, str, str, float]]:
         """
-        Sweeps the full image using EasyOCR's CRAFT detector to capture both safety
-        and open-vocabulary placards (room numbers, notices, wayfinding).
+        Sweeps the full image using EasyOCR's CRAFT detector to capture standalone signs.
         Returns list of (x1, y1, x2, y2, matched_category, raw_text, ocr_conf).
         """
         if self.reader is None:
@@ -407,21 +379,17 @@ class MultimodalSignDetector:
         results: list[tuple[float, float, float, float, str, str, float]] = []
 
         try:
-            # Run text reader with user-specified test threshold 0.20
+            # Run text reader (returns list of [bbox_polygon, text, confidence])
             ocr_out = self.reader.readtext(
                 rgb_bgr,
                 min_size=min_box_size,
-                text_threshold=0.20,
-                low_text=0.20,
-                link_threshold=0.35,
+                text_threshold=0.50,
+                low_text=0.35,
+                link_threshold=0.40,
             )
 
             for bbox_poly, raw_text, ocr_conf in ocr_out:
-                if not raw_text:
-                    continue
-                raw_clean = _clean_text(raw_text)
-                alnum_count = sum(c.isalnum() for c in raw_clean)
-                if alnum_count < 2 or float(ocr_conf) < 0.20:
+                if not raw_text or float(ocr_conf) < 0.30:
                     continue
 
                 poly = np.array(bbox_poly, dtype=np.float32)
@@ -431,14 +399,14 @@ class MultimodalSignDetector:
                 y2 = float(np.max(poly[:, 1]))
 
                 # Pad slightly to capture surrounding placard boundary
-                pad_w = 0.20 * (x2 - x1)
-                pad_h = 0.25 * (y2 - y1)
+                pad_w = 0.15 * (x2 - x1)
+                pad_h = 0.15 * (y2 - y1)
                 x1 = max(0.0, x1 - pad_w)
                 y1 = max(0.0, y1 - pad_h)
                 x2 = min(float(w_frame), x2 + pad_w)
                 y2 = min(float(h_frame), y2 + pad_h)
 
-                # 1. Check against closed safety vocabulary first (Tier 1)
+                # Check against vocabulary
                 matched_cat = None
                 best_score = 0.0
                 for cat_name, cat_spec in HOSPITAL_SIGN_TAXONOMY.items():
@@ -447,28 +415,15 @@ class MultimodalSignDetector:
                         best_score = score
                         matched_cat = cat_name
 
-                # 2. Check against open vocabulary taxonomy (Tier 2)
-                if matched_cat is None:
-                    for open_name, open_spec in OPEN_SIGN_TAXONOMY.items():
-                        is_match, kw, score = _fuzzy_match_keywords(raw_text, open_spec["keywords"])
-                        if is_match and score > best_score:
-                            best_score = score
-                            matched_cat = open_name
-
-                # 3. If unclassified, but contains alphanumeric words (e.g. general room name, numbers)
-                if matched_cat is None and alnum_count >= 2:
-                    matched_cat = "room_sign" if len(raw_clean.split()) <= 4 else "notice_board"
-                    best_score = float(ocr_conf)
-
                 if matched_cat is not None:
-                    results.append((x1, y1, x2, y2, matched_cat, raw_text.strip(), float(ocr_conf)))
+                    results.append((x1, y1, x2, y2, matched_cat, raw_text, float(ocr_conf)))
 
         except Exception as exc:
             LOG.warning("[SIGN DETECTOR] Periodic CRAFT sweep error: %s", exc)
 
         return results
 
-    # ── Pure Text OCR Recognition (Deterministic) ───────────────────────────────
+    # ── Multimodal Cognition (OCR + CLIP Fusion) ────────────────────────────────
 
     def classify_crop(
         self,
@@ -476,8 +431,7 @@ class MultimodalSignDetector:
         category_hint: str | None = None,
     ) -> tuple[str | None, str | None, str | None, float, str]:
         """
-        Evaluates a localized image crop using pure text OCR across both closed safety
-        and open-vocabulary sign taxonomies (CLIP eliminated).
+        Evaluates a localized image crop using OCR and CLIP.
         Returns: (category, text_content, symbol_label, confidence, modality)
         """
         h_crop, w_crop = crop_bgr.shape[:2]
@@ -495,75 +449,90 @@ class MultimodalSignDetector:
         ocr_text: str | None = None
         ocr_conf = 0.0
 
-        # EasyOCR Recognition
+        # Stream 1: EasyOCR Recognition
         if self.reader is not None:
             try:
-                ocr_out = self.reader.readtext(crop_eval, min_size=8, text_threshold=0.20, low_text=0.20)
+                ocr_out = self.reader.readtext(crop_eval, min_size=8, text_threshold=0.25, low_text=0.20)
                 if ocr_out:
-                    joined_text = " ".join([item[1] for item in ocr_out if item[1]])
-                    cleaned_str = _clean_text(joined_text)
-                    alnum_count = sum(c.isalnum() for c in cleaned_str)
-                    if alnum_count >= 2:
-                        ocr_conf = float(np.mean([item[2] for item in ocr_out])) if ocr_out else 0.0
-                        ocr_text = joined_text.strip()
+                    joined_text = " ".join([item[1] for item in ocr_out])
+                    ocr_conf = float(np.mean([item[2] for item in ocr_out])) if ocr_out else 0.0
+                    ocr_text = joined_text
 
-                        # Check closed safety taxonomy (Tier 1)
-                        for cat_name, cat_spec in HOSPITAL_SIGN_TAXONOMY.items():
-                            is_match, kw, score = _fuzzy_match_keywords(joined_text, cat_spec["text_keywords"])
-                            if is_match:
-                                ocr_cat = cat_name
-                                ocr_conf = max(ocr_conf, score)
-                                break
-
-                        # Check open-vocabulary taxonomy (Tier 2)
-                        if ocr_cat is None:
-                            for open_name, open_spec in OPEN_SIGN_TAXONOMY.items():
-                                is_match, kw, score = _fuzzy_match_keywords(joined_text, open_spec["keywords"])
-                                if is_match:
-                                    ocr_cat = open_name
-                                    ocr_conf = max(ocr_conf, score)
-                                    break
+                    for cat_name, cat_spec in HOSPITAL_SIGN_TAXONOMY.items():
+                        is_match, kw, score = _fuzzy_match_keywords(joined_text, cat_spec["text_keywords"])
+                        if is_match:
+                            ocr_cat = cat_name
+                            ocr_conf = max(ocr_conf, score)
+                            break
             except Exception as exc:
                 LOG.debug("[SIGN DETECTOR] Crop OCR error: %s", exc)
 
-        # If no legible alphanumeric text was found and no door header anchor, REJECT.
-        has_valid_text = bool(ocr_text and sum(c.isalnum() for c in _clean_text(ocr_text)) >= 2 and ocr_conf >= 0.20)
-        is_door_header_exit = (category_hint == "exit_sign")
+        # Stream 2: CLIP Zero-Shot Pictogram Recognition
+        clip_cat: str | None = None
+        clip_score = 0.0
+        clip_label: str | None = None
 
-        if not has_valid_text and not is_door_header_exit:
-            return None, None, None, 0.0, "no_text"
+        if self.clip_model is not None and self.clip_processor is not None and self.prompt_embeddings is not None:
+            try:
+                crop_rgb = cv2.cvtColor(crop_eval, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(crop_rgb)
+                inputs = self.clip_processor(images=pil_img, return_tensors="pt").to(self.device)
 
+                with torch.no_grad():
+                    out = self.clip_model.get_image_features(**inputs)
+                    img_features = out.pooler_output if hasattr(out, "pooler_output") else out
+                    img_features = img_features / img_features.norm(dim=-1, keepdim=True)
+                    sims = torch.matmul(img_features, self.prompt_embeddings.T).squeeze(0).cpu().numpy()
+
+                num_signs = len(self.sign_categories)
+                sign_sims = sims[:num_signs]
+                neg_sims = sims[num_signs:]
+
+                best_sign_idx = int(np.argmax(sign_sims))
+                best_sign_score = float(sign_sims[best_sign_idx])
+                max_neg_score = float(np.max(neg_sims)) if len(neg_sims) > 0 else 0.0
+
+                # Score margin against background / clutter prompts
+                if best_sign_score >= 0.22 and best_sign_score > (max_neg_score + 0.02):
+                    clip_cat = self.sign_categories[best_sign_idx]
+                    clip_score = best_sign_score
+                    clip_label = HOSPITAL_SIGN_TAXONOMY[clip_cat]["display_name"]
+            except Exception as exc:
+                LOG.debug("[SIGN DETECTOR] Crop CLIP error: %s", exc)
+
+        # Stream 3: Multimodal Decision Fusion Matrix
         final_cat: str | None = None
-        final_conf = ocr_conf
-        final_modality = "ocr"
+        final_conf = 0.0
+        final_modality = "none"
 
-        # Case 1: Safety sign text match (e.g. "EXIT", "EMERGENCY EXIT", "BIOHAZARD")
-        if ocr_cat is not None and ocr_cat in HOSPITAL_SIGN_TAXONOMY:
+        # Case 1: Both OCR and CLIP Agree (Highest Confidence)
+        if ocr_cat is not None and clip_cat is not None and ocr_cat == clip_cat:
             final_cat = ocr_cat
-            final_conf = max(ocr_conf, 0.85)
-            final_modality = "ocr_safety"
+            final_conf = min(0.99, max(ocr_conf, clip_score) * 1.10)
+            final_modality = "multimodal_fusion"
 
-        # Case 2: Open-vocabulary text match (room_sign, notice_board, directional_sign)
-        elif ocr_cat is not None and ocr_cat in OPEN_SIGN_TAXONOMY:
+        # Case 2: Strong OCR Text Match
+        elif ocr_cat is not None and ocr_conf >= 0.70:
             final_cat = ocr_cat
-            final_conf = max(ocr_conf, 0.75)
-            final_modality = "ocr_open_vocab"
-
-        # Case 3: Door Header Exit Sign (ISO 7010 running man or header placement)
-        # CRUCIAL: Protect exit signs above doors from being converted to room signs!
-        elif is_door_header_exit:
-            final_cat = "exit_sign"
-            final_conf = max(ocr_conf, 0.85)
-            final_modality = "door_header_safety"
-
-        # Case 4: Legible text detected elsewhere but unclassified -> room_sign or notice_board
-        elif has_valid_text:
-            clean_words = _clean_text(ocr_text).split()
-            final_cat = "room_sign" if len(clean_words) <= 4 else "notice_board"
             final_conf = ocr_conf
-            final_modality = "ocr_open_vocab"
+            final_modality = "ocr"
 
-        return final_cat, ocr_text, None, final_conf, final_modality
+        # Case 3: Strong CLIP Pictogram Match (Icon-only signs, ISO symbols)
+        elif clip_cat is not None and clip_score >= 0.24:
+            # If a contextual hint exists and matches CLIP, boost confidence
+            if category_hint is not None and category_hint == clip_cat:
+                clip_score = min(0.95, clip_score * 1.25)
+            final_cat = clip_cat
+            final_conf = clip_score
+            final_modality = "clip"
+
+        # Case 4: Contextual Hint Support (e.g. above door with partial text)
+        elif category_hint is not None and (ocr_cat == category_hint or clip_cat == category_hint):
+            final_cat = category_hint
+            final_conf = max(ocr_conf, clip_score, 0.75)
+            final_modality = "contextual_fusion"
+
+        return final_cat, ocr_text, clip_label, final_conf, final_modality
 
     # ── 3D Spatial Deduplication ────────────────────────────────────────────────
 
@@ -631,7 +600,12 @@ class MultimodalSignDetector:
         for x1, y1, x2, y2, hint in context_cues:
             candidate_rois.append((x1, y1, x2, y2, hint, None, 0.0))
 
-        # Trigger 2: Full-Scene Text OCR Sweep (Every frame / cadence frames)
+        # Trigger 1b: Green Safety Rectangle Proposals (ISO 7010 Emergency Exit)
+        green_cues = self.generate_green_sign_rois((h_frame, w_frame), rgb_bgr)
+        for x1, y1, x2, y2, hint in green_cues:
+            candidate_rois.append((x1, y1, x2, y2, hint, None, 0.0))
+
+        # Trigger 2: Periodic Full-Scene Sweep (Every N frames)
         if frame_index % max(1, cadence) == 0:
             periodic_rois = self.generate_periodic_text_rois(rgb_bgr)
             for x1, y1, x2, y2, matched_cat, raw_text, ocr_conf in periodic_rois:
@@ -663,8 +637,8 @@ class MultimodalSignDetector:
 
             crop = rgb_bgr[iy1:iy2, ix1:ix2]
 
-            # If periodic detector already extracted valid text, short-circuit
-            if prefetched_text is not None and prefetched_conf >= 0.20 and (hint in HOSPITAL_SIGN_TAXONOMY or hint in OPEN_SIGN_TAXONOMY):
+            # If periodic detector already extracted high-confidence text, short-circuit
+            if prefetched_text is not None and prefetched_conf >= 0.65 and hint in HOSPITAL_SIGN_TAXONOMY:
                 cat = hint
                 text_content = prefetched_text
                 symbol_label = None
@@ -673,24 +647,10 @@ class MultimodalSignDetector:
             else:
                 cat, text_content, symbol_label, conf, modality = self.classify_crop(crop, category_hint=hint)
 
-            if cat is None:
+            if cat is None or cat not in HOSPITAL_SIGN_TAXONOMY:
                 continue
 
-            spec = HOSPITAL_SIGN_TAXONOMY.get(cat) or OPEN_SIGN_TAXONOMY.get(cat)
-            if spec is None:
-                continue
-
-            # Format dynamic badge label with transcribed text
-            if text_content and text_content.strip():
-                clean_badge_text = re.sub(r"\s+", " ", text_content.strip())
-                if len(clean_badge_text) > 18:
-                    clean_badge_text = clean_badge_text[:17] + "…"
-                badge_prefix = spec.get("badge_prefix") or spec.get("badge_label", "[SIGN]").strip("[]")
-                badge_label = f"[{badge_prefix}: {clean_badge_text.upper()}]"
-                display_name = f"{spec['display_name']} ({clean_badge_text})"
-            else:
-                badge_label = spec.get("badge_label") or f"[{spec.get('badge_prefix', 'SIGN')}]"
-                display_name = spec["display_name"]
+            spec = HOSPITAL_SIGN_TAXONOMY[cat]
 
             # 3D Backprojection and Wall Backing Gate
             world_pos = None
@@ -718,8 +678,8 @@ class MultimodalSignDetector:
                     elevation_m = float(world_pt[2])
 
                     # Physical Elevation Gate
-                    min_elev = spec.get("min_elevation_m", 0.50)
-                    max_elev = spec.get("max_elevation_m", 3.00)
+                    min_elev = spec.get("min_elevation_m", -0.5)
+                    max_elev = spec.get("max_elevation_m", 3.5)
                     if not (min_elev <= elevation_m <= max_elev):
                         LOG.debug(
                             "[SIGN DETECTOR] Dropped %s: Elevation %.2fm outside valid range [%.2f, %.2f]m",
@@ -729,8 +689,8 @@ class MultimodalSignDetector:
 
             sign_instance = DetectedSign(
                 canonical_name=spec["canonical_name"],
-                display_name=display_name,
-                badge_label=badge_label,
+                display_name=spec["display_name"],
+                badge_label=spec["badge_label"],
                 confidence=conf,
                 bbox_xyxy=[float(x1), float(y1), float(x2), float(y2)],
                 modality=modality,
