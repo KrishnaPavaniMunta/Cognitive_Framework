@@ -969,7 +969,7 @@ def setup_logging(log_path: Path, verbose: bool) -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build a semantic map (3D object pins) from a recorded ROS2 bag.")
-    p.add_argument("--bag", required=True, help="Path to the ROS2 bag folder (sqlite3 or mcap)")
+    p.add_argument("--bag", default="", help="Path, partial name (e.g. 153314), or menu number of the ROS2 bag folder (interactive menu if omitted)")
     p.add_argument("--out-root", default=str(DEFAULT_OUT_ROOT), help="Root folder containing one persistent map folder per bag")
 
     p.add_argument("--rgb-topic", default=capture.DEFAULT_RGB_TOPIC)
@@ -1145,16 +1145,78 @@ def seed_persistent_map_from_legacy(out_root: Path, safe_label: str, db_path: Pa
     return None
 
 
+def discover_available_bags() -> list[Path]:
+    """Fast bounded discovery of ROS2 bag folders under 02_datasets."""
+    datasets_dir = PROJECT_ROOT / "02_datasets"
+    if not datasets_dir.exists():
+        return []
+    patterns = ("*/metadata.yaml", "*/*/metadata.yaml", "*/*/*/metadata.yaml", "*/*/*/*/metadata.yaml")
+    found = {p.parent.resolve() for pat in patterns for p in datasets_dir.glob(pat)}
+    return sorted(found, key=lambda p: (p.parent.name.lower(), p.name.lower()))
+
+
+def resolve_bag_argument(bag_arg: str) -> Path:
+    """Resolve an exact path, partial bag name/timestamp (e.g. '153314'), menu index, or prompt interactively."""
+    bags = discover_available_bags()
+    raw = (bag_arg or "").strip().strip('"').strip("'")
+
+    if not raw:
+        if not bags:
+            raise FileNotFoundError("No ROS2 bags found in 02_datasets/ and no --bag argument provided.")
+        print("\n" + "=" * 78)
+        print("  AVAILABLE ROS2 BAGS (02_datasets)")
+        print("=" * 78)
+        for idx, b in enumerate(bags, start=1):
+            try:
+                rel = b.relative_to(PROJECT_ROOT)
+            except ValueError:
+                rel = b
+            print(f"  [{idx:2d}] {b.name:<38} ({rel})")
+        print("=" * 78)
+        raw = input("Select bag number [1-{}], partial name (e.g. 153314), or full path: ".format(len(bags))).strip().strip('"').strip("'")
+        if not raw:
+            raise ValueError("No bag selected.")
+
+    # 1. Menu index (1..N)
+    if raw.isdigit() and bags:
+        idx = int(raw)
+        if 1 <= idx <= len(bags):
+            return bags[idx - 1]
+
+    # 2. Direct path check
+    candidate = Path(raw)
+    if candidate.exists():
+        resolved = candidate.resolve()
+        if resolved.is_dir() and not (resolved / "metadata.yaml").exists():
+            nested = [p.parent for p in resolved.glob("*/metadata.yaml")]
+            if nested:
+                return nested[0].resolve()
+        return resolved
+
+    # 3. Partial name / timestamp substring match across discovered bags
+    raw_lower = raw.lower()
+    exact_name_matches = [b for b in bags if b.name.lower() == raw_lower]
+    if len(exact_name_matches) == 1:
+        return exact_name_matches[0]
+    substring_matches = [b for b in bags if raw_lower in b.name.lower() or raw_lower in str(b).lower()]
+    if len(substring_matches) == 1:
+        return substring_matches[0]
+    if len(substring_matches) > 1:
+        print(f"\nMultiple bags matched '{raw}':")
+        for idx, b in enumerate(substring_matches, start=1):
+            print(f"  [{idx}] {b.name}  ({b})")
+        choice = input(f"Select [1-{len(substring_matches)}] (default=1): ").strip() or "1"
+        if choice.isdigit() and 1 <= int(choice) <= len(substring_matches):
+            return substring_matches[int(choice) - 1]
+        return substring_matches[0]
+
+    raise FileNotFoundError(f"Bag not found matching '{raw}'. Run without --bag to see the interactive list.")
+
+
 def main() -> None:
     args = parse_args()
 
-    bag_path = Path(args.bag).resolve()
-    if not bag_path.exists():
-        raise FileNotFoundError(f"Bag not found: {bag_path}")
-    if bag_path.is_dir() and not (bag_path / "metadata.yaml").exists():
-        nested = [p.parent for p in bag_path.glob("*/metadata.yaml")]
-        if nested:
-            bag_path = nested[0]
+    bag_path = resolve_bag_argument(args.bag)
     bag_label = bag_path.stem if bag_path.is_file() else bag_path.name
     safe_label = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in bag_label)
 

@@ -46,6 +46,73 @@ def find_latest_db(out_root: Path) -> Path:
     return candidates[0]
 
 
+def discover_available_maps(out_root: Path) -> list[Path]:
+    """Return all available world_map.db / semantic_map.db files sorted newest-first."""
+    candidates = list(out_root.glob("*/world_map.db"))
+    candidates.extend(out_root.glob("semanticmap_*/semantic_map.db"))
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates
+
+
+def resolve_db_argument(db_arg: str, out_root: Path, interactive: bool = False) -> Path:
+    """Resolve an exact DB/RRD path, partial map name (e.g. '143812'), menu number, or interactive menu."""
+    maps = discover_available_maps(out_root)
+    raw = (db_arg or "").strip().strip('"').strip("'")
+
+    if not raw and interactive:
+        if not maps:
+            raise FileNotFoundError(f"No semantic maps found under {out_root}")
+        print("\n" + "=" * 78)
+        print("  AVAILABLE 3D SEMANTIC MAPS")
+        print("=" * 78)
+        for idx, db_p in enumerate(maps, start=1):
+            rrd_p = db_p.parent / "world_map.rrd"
+            rrd_info = f"world_map.rrd ({rrd_p.stat().st_size / (1024 * 1024):.1f} MB)" if rrd_p.exists() else "DB only"
+            print(f"  [{idx:2d}] {db_p.parent.name:<38} [{rrd_info}]")
+        print("=" * 78)
+        raw = input(f"Select map number [1-{len(maps)}] or partial name (Enter=1 newest): ").strip().strip('"').strip("'") or "1"
+
+    if not raw:
+        return find_latest_db(out_root)
+
+    # 1. Menu index (1..N)
+    if raw.isdigit() and maps:
+        idx = int(raw)
+        if 1 <= idx <= len(maps):
+            return maps[idx - 1]
+
+    # 2. Direct path to .db, .rrd, or map folder
+    candidate = Path(raw)
+    if candidate.exists():
+        resolved = candidate.resolve()
+        if resolved.is_dir():
+            if (resolved / "world_map.db").exists():
+                return (resolved / "world_map.db").resolve()
+            if (resolved / "semantic_map.db").exists():
+                return (resolved / "semantic_map.db").resolve()
+        if resolved.suffix.lower() == ".rrd":
+            sibling_db = resolved.parent / "world_map.db"
+            if sibling_db.exists():
+                return sibling_db.resolve()
+        return resolved
+
+    # 3. Partial name / timestamp match (e.g. '143812' or '153314')
+    raw_lower = raw.lower()
+    matches = [m for m in maps if raw_lower in m.parent.name.lower() or raw_lower in str(m).lower()]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        print(f"\nMultiple maps matched '{raw}':")
+        for idx, m in enumerate(matches, start=1):
+            print(f"  [{idx}] {m.parent.name}  ({m})")
+        choice = input(f"Select [1-{len(matches)}] (default=1): ").strip() or "1"
+        if choice.isdigit() and 1 <= int(choice) <= len(matches):
+            return matches[int(choice) - 1]
+        return matches[0]
+
+    raise FileNotFoundError(f"Map not found matching '{raw}' under {out_root}")
+
+
 def load_landmarks(conn: sqlite3.Connection, min_hits: int, classes: set[str] | None) -> list[dict]:
     available = {row[1] for row in conn.execute("PRAGMA table_info(semantic_map)")}
     required = ["landmark_id", "class_name", "world_frame", "X", "Y", "Z", "hit_count", "mean_confidence"]
@@ -325,7 +392,8 @@ def render_rerun(landmarks: list[dict], observations: list[dict],
 
 def main() -> None:
     p = argparse.ArgumentParser(description="View a semantic map in 3D with labels.")
-    p.add_argument("--db", default="", help="Path to semantic_map.db (default: newest run)")
+    p.add_argument("--db", default="", help="Path, partial name (e.g. 143812), or menu number of world_map.db (default: newest run)")
+    p.add_argument("--menu", action="store_true", help="Show interactive numbered menu of available semantic maps")
     p.add_argument("--out-root", default=str(DEFAULT_OUT_ROOT))
     p.add_argument("--min-hits", type=int, default=1, help="Hide landmarks seen fewer than N times")
     p.add_argument("--classes", default="", help="Comma-separated class whitelist")
@@ -346,7 +414,17 @@ def main() -> None:
     if args.save and (args.html or args.rerun):
         p.error("--save is only available with the default matplotlib viewer")
 
-    db_path = Path(args.db).resolve() if args.db else find_latest_db(Path(args.out_root).resolve())
+    # Direct .rrd file shortcut (e.g. dragged/dropped .rrd file)
+    if args.db and args.db.strip().lower().endswith(".rrd") and Path(args.db.strip()).exists() and args.rerun:
+        rrd_direct = Path(args.db.strip()).resolve()
+        rerun_bin = sys.executable.replace("python.exe", "rerun.exe")
+        if Path(rerun_bin).exists():
+            print(f"Opening Rerun recording: {rrd_direct}")
+            import subprocess
+            subprocess.Popen([str(rerun_bin), str(rrd_direct)])
+            return
+
+    db_path = resolve_db_argument(args.db, Path(args.out_root).resolve(), interactive=args.menu)
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 

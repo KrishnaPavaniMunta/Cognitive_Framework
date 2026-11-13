@@ -6,23 +6,51 @@
 # 1. Navigate to Project Root (PowerShell)
 cd "D:\Object Detection Model\yolo_tr\yolo_tr\Cognitive Recognition framework"
 
-# 2. Build Semantic Map with 3D Multi-View Consensus + Rerun Export
-& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
-  ".\01_codebase\09_semantic_map\build_semantic_map_from_bag.py" `
-  --bag ".\02_datasets\kmi\rgbd_clean_20260925_134830-20261007T134658Z-1-002" `
-  --frame-stride 3 `
-  --merge-radius-m 0.5 `
+# ==============================================================================
+# 2. BUILD 3D SEMANTIC MAP FROM ANY ROS2 BAG
+# ==============================================================================
+
+# Option A: Interactive Numbered Bag Menu (lists all bags in 02_datasets)
+.\run_bag.bat
+
+# Option B: Run by Short Bag Keyword / Timestamp (auto-resolves full path)
+.\run_bag.bat 153314
+.\run_bag.bat 143812
+.\run_bag.bat 134830
+
+# Option C: Full Python Command (supports interactive menu if --bag is omitted,
+#           short keywords like --bag 153314, or full folder paths)
+.\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe `
+  01_codebase\09_semantic_map\build_semantic_map_from_bag.py `
+  --bag 153314 `
+  --frame-stride 4 `
   --min-consensus-hits 3 `
-  --rerun `
-  --rerun-cloud-stride 10 `
-  --rerun-cloud-every 10
+  --reset-map
 
-# 3. View in Rerun 3D Desktop Viewer
-& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\rerun.exe" `
-  ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260925_134830\world_map.rrd"
+# ==============================================================================
+# 3. VIEW 3D DIGITAL TWIN IN RERUN (world_map.rrd)
+# ==============================================================================
 
-# 4. View in Interactive Web Browser (Plotly HTML)
-& ".\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe" `
-  ".\01_codebase\09_semantic_map\view_semantic_map.py" `
-  --db ".\04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_clean_20260925_134830\world_map.db" `
+# Option A: Interactive Numbered Map Menu (Enter = opens newest map)
+.\view_map.bat
+
+# Option B: Open Specific Map by Short Keyword / Timestamp
+.\view_map.bat 143812
+.\view_map.bat 153314
+
+# Option C: Direct Rerun CLI Command
+.\07_environment_and_project_meta\.venv-gpu311\Scripts\rerun.exe `
+  "04_outputs_runs_and_logs\outputs\semantic_maps\rgbd_pose_20261103_143812\world_map.rrd"
+
+# ==============================================================================
+# 4. VIEW INTERACTIVE 3D ONTOLOGY & H&S COMPLIANCE WEB VIEWER (HTML)
+# ==============================================================================
+
+# Option A: Interactive Menu -> Opens HTML in Browser
+.\view_map.bat --html
+
+# Option B: Open Specific Map HTML by Short Keyword
+.\07_environment_and_project_meta\.venv-gpu311\Scripts\python.exe `
+  01_codebase\09_semantic_map\view_semantic_map.py `
+  --db 143812 `
   --html
