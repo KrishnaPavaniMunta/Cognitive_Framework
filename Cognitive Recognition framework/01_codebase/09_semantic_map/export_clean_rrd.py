@@ -47,7 +47,12 @@ def ensure_environmental_point_cloud(run_dir: Path, db_path: Path) -> tuple[np.n
     if cache_path.exists():
         try:
             data = np.load(cache_path)
-            return data["points"], data["colors"]
+            pts_cached = data["points"]
+            cols_cached = data["colors"]
+            # Invalidate corrupted cache if >500k points or ceiling wasn't clipped on an un-cached run
+            if len(pts_cached) <= 500000:
+                return pts_cached, cols_cached
+            print(f"[RRD] Rebuilding oversized/unclipped point cloud cache ({len(pts_cached)} pts)...")
         except Exception as exc:
             print(f"[RRD] Warning: failed loading point cloud cache {cache_path.name}: {exc}")
 
@@ -61,9 +66,12 @@ def ensure_environmental_point_cloud(run_dir: Path, db_path: Path) -> tuple[np.n
         conn.close()
         return None, None
 
-    poses = conn.execute("SELECT frame_index, matrix_json FROM camera_poses ORDER BY frame_index").fetchall()
-    pose_by_frame = {int(p["frame_index"]): p for p in poses if p["matrix_json"]}
+    poses = conn.execute("SELECT frame_index, timestamp_ns, matrix_json FROM camera_poses ORDER BY timestamp_ns").fetchall()
+    valid_poses = [p for p in poses if p["matrix_json"] and p["timestamp_ns"]]
     conn.close()
+
+    if not valid_poses:
+        return None, None
 
     try:
         from rosbags.highlevel import AnyReader
@@ -71,52 +79,69 @@ def ensure_environmental_point_cloud(run_dir: Path, db_path: Path) -> tuple[np.n
         import rosbag_rgbd_sim_capture as capture
 
         typestore = get_typestore(Stores.ROS2_HUMBLE)
-        fx, fy, cx, cy = 525.0, 525.0, 320.0, 240.0
+        fx, fy, cx, cy = 605.0, 605.0, 320.0, 240.0
         depth_step = 6
         grid_u, grid_v = np.meshgrid(np.arange(0, 640, depth_step), np.arange(0, 480, depth_step))
         grid_u = grid_u.astype(np.float32)
         grid_v = grid_v.astype(np.float32)
 
-        stride_step = 20
+        sample_step = max(1, len(valid_poses) // 120)
+        sampled_poses = valid_poses[::sample_step]
+        sampled_ts = [int(p["timestamp_ns"]) for p in sampled_poses]
+        used_pose_indices: set[int] = set()
+
         env_points = []
         env_colors = []
 
         capture.ensure_bag_storage_files(bag_path)
         with AnyReader([bag_path], default_typestore=typestore) as reader:
             rgb_conns = [c for c in reader.connections if c.topic == "/camera/rgb/image_rect_color"]
+            if not rgb_conns:
+                rgb_conns = [c for c in reader.connections if "Image" in c.msgtype and "Compressed" not in c.msgtype and ("rgb" in c.topic.lower() or "color" in c.topic.lower()) and "depth" not in c.topic.lower()]
             depth_conns = [c for c in reader.connections if c.topic == "/camera/depth_registered/image_raw"]
+            if not depth_conns:
+                depth_conns = [c for c in reader.connections if "Image" in c.msgtype and "Compressed" not in c.msgtype and "depth" in c.topic.lower()]
+            caminfo_conns = [c for c in reader.connections if "CameraInfo" in c.msgtype]
             if not rgb_conns or not depth_conns:
                 return None, None
 
-            conns = rgb_conns + depth_conns
+            if caminfo_conns:
+                for _, _, raw_ci in reader.messages(connections=caminfo_conns[:1]):
+                    ci_msg = reader.deserialize(raw_ci, caminfo_conns[0].msgtype)
+                    intr = capture._intrinsics_from_camera_info(ci_msg)
+                    if capture._is_intrinsics_sane(intr):
+                        fx, fy, cx, cy = float(intr.fx), float(intr.fy), float(intr.cx), float(intr.cy)
+                    break
+
+            rgb_topic_name = rgb_conns[0].topic
+            depth_topic_name = depth_conns[0].topic
+            conns = [c for c in reader.connections if c.topic in (rgb_topic_name, depth_topic_name)]
             latest_depth_raw = None
             latest_depth_msgtype = depth_conns[0].msgtype
-            frame_idx = 0
 
-            for conn_item, _, raw in reader.messages(connections=conns):
-                if conn_item.topic == "/camera/depth_registered/image_raw":
+            for conn_item, bag_ts, raw in reader.messages(connections=conns):
+                if conn_item.topic == depth_topic_name:
                     latest_depth_raw = raw
-                elif conn_item.topic == "/camera/rgb/image_rect_color":
-                    frame_idx += 1
-                    if frame_idx % 4 != 0:
+                elif conn_item.topic == rgb_topic_name:
+                    if latest_depth_raw is None:
                         continue
-                    db_frame = frame_idx // 4
-                    if db_frame % stride_step != 0:
+                    rgb_msg = reader.deserialize(raw, conn_item.msgtype)
+                    msg_ts = capture._message_timestamp_ns(rgb_msg, int(bag_ts))
+                    p_idx = capture._closest_index(sampled_ts, msg_ts)
+                    if p_idx < 0 or p_idx in used_pose_indices:
                         continue
-
-                    p = pose_by_frame.get(db_frame)
-                    if not p or latest_depth_raw is None:
+                    if abs(sampled_ts[p_idx] - msg_ts) > 35_000_000:
                         continue
+                    used_pose_indices.add(p_idx)
+                    p = sampled_poses[p_idx]
 
                     dmsg = reader.deserialize(latest_depth_raw, latest_depth_msgtype)
-                    rgb_msg = reader.deserialize(raw, conn_item.msgtype)
-
                     depth_mm = capture._decode_depth_image_mm(dmsg)
                     if depth_mm is None:
                         continue
 
                     depth_sample = depth_mm[::depth_step, ::depth_step].astype(np.float32) / 1000.0
-                    valid = (depth_sample > 0.40) & (depth_sample < 6.0) & np.isfinite(depth_sample)
+                    valid = (depth_sample > 0.40) & (depth_sample < 4.8) & np.isfinite(depth_sample)
                     if not np.any(valid):
                         continue
 
@@ -132,12 +157,18 @@ def ensure_environmental_point_cloud(run_dir: Path, db_path: Path) -> tuple[np.n
                     T = M[:3, 3]
                     pts_world = (pts_cam @ R.T) + T
 
+                    # Clip ceiling (Z > 1.75m) and sub-floor noise (Z < -0.15m) for open-roof dollhouse view
+                    keep = (pts_world[:, 2] >= -0.15) & (pts_world[:, 2] <= 1.75)
+                    if not np.any(keep):
+                        continue
+                    pts_world = pts_world[keep]
+
                     rgb_bgr = capture._decode_color_image(rgb_msg)
                     if rgb_bgr is not None:
                         rgb = cv2.cvtColor(rgb_bgr, cv2.COLOR_BGR2RGB)
-                        colors = rgb[::depth_step, ::depth_step][valid]
+                        colors = rgb[::depth_step, ::depth_step][valid][keep]
                     else:
-                        colors = np.full((len(z), 3), 180, dtype=np.uint8)
+                        colors = np.full((len(pts_world), 3), 180, dtype=np.uint8)
 
                     env_points.append(pts_world)
                     env_colors.append(colors)
@@ -409,7 +440,7 @@ def export_clean_rrd(db_path: Path, out_rrd: Path | None = None) -> Path:
     if env_pts is not None and env_cols is not None:
         rr.log(
             "world/environment_point_cloud",
-            rr.Points3D(env_pts, colors=env_cols, radii=0.020),
+            rr.Points3D(env_pts, colors=env_cols, radii=0.012),
             static=True,
         )
         print(f"[RRD] Logged {len(env_pts)} structural point cloud points.")

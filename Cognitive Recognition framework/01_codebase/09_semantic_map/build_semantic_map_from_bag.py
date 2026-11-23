@@ -1146,12 +1146,14 @@ def seed_persistent_map_from_legacy(out_root: Path, safe_label: str, db_path: Pa
 
 
 def discover_available_bags() -> list[Path]:
-    """Fast bounded discovery of ROS2 bag folders under 02_datasets."""
+    """Fast bounded discovery of ROS2 bag folders and ROS1 .bag files under 02_datasets."""
     datasets_dir = PROJECT_ROOT / "02_datasets"
     if not datasets_dir.exists():
         return []
-    patterns = ("*/metadata.yaml", "*/*/metadata.yaml", "*/*/*/metadata.yaml", "*/*/*/*/metadata.yaml")
-    found = {p.parent.resolve() for pat in patterns for p in datasets_dir.glob(pat)}
+    meta_patterns = ("*/metadata.yaml", "*/*/metadata.yaml", "*/*/*/metadata.yaml", "*/*/*/*/metadata.yaml")
+    found = {p.parent.resolve() for pat in meta_patterns for p in datasets_dir.glob(pat)}
+    bag_patterns = ("*.bag", "*/*.bag", "*/*/*.bag", "*/*/*/*.bag")
+    found.update(p.resolve() for pat in bag_patterns for p in datasets_dir.glob(pat) if p.is_file())
     return sorted(found, key=lambda p: (p.parent.name.lower(), p.name.lower()))
 
 
@@ -1251,10 +1253,28 @@ def main() -> None:
         for topic, msgtype in sorted(available_topics.items()):
             LOG.debug("        %-52s %s", topic, msgtype)
 
-        missing = [t for t in (args.rgb_topic, args.depth_topic, args.camera_info_topic)
-                   if t not in available_topics]
+        image_topics = [t for t, mt in available_topics.items() if "Image" in mt and "Compressed" not in mt]
+        caminfo_topics = [t for t, mt in available_topics.items() if "CameraInfo" in mt]
+
+        if args.rgb_topic not in available_topics:
+            rgb_candidates = [t for t in image_topics if ("rgb" in t.lower() or "color" in t.lower()) and "depth" not in t.lower()]
+            if rgb_candidates:
+                LOG.info("[BAG] Auto-resolved RGB topic: %s -> %s", args.rgb_topic, rgb_candidates[0])
+                args.rgb_topic = rgb_candidates[0]
+
+        if args.depth_topic not in available_topics:
+            depth_candidates = [t for t in image_topics if "depth" in t.lower()]
+            if depth_candidates:
+                LOG.info("[BAG] Auto-resolved Depth topic: %s -> %s", args.depth_topic, depth_candidates[0])
+                args.depth_topic = depth_candidates[0]
+
+        if args.camera_info_topic not in available_topics and caminfo_topics:
+            LOG.info("[BAG] Auto-resolved CameraInfo topic: %s -> %s", args.camera_info_topic, caminfo_topics[0])
+            args.camera_info_topic = caminfo_topics[0]
+
+        missing = [t for t in (args.rgb_topic, args.depth_topic) if t not in available_topics]
         if missing:
-            raise RuntimeError(f"Missing required topics in bag: {missing}")
+            raise RuntimeError(f"Missing required RGB/Depth topics in bag: {missing}")
 
         selected = {args.rgb_topic, args.depth_topic, args.camera_info_topic,
                     args.tf_topic, args.tf_static_topic, args.odom_topic}
@@ -1276,8 +1296,21 @@ def main() -> None:
              len(tf_messages), len(tf_static_messages), len(odom_messages),
              skipped.get("deserialize_errors", 0))
 
-    if not rgb_messages or not depth_messages or not caminfo_messages:
-        raise RuntimeError("Bag is missing RGB, depth or camera_info messages; cannot build a map.")
+    if not rgb_messages or not depth_messages:
+        raise RuntimeError("Bag is missing RGB or depth messages; cannot build a map.")
+
+    fallback_intrinsics: capture.CameraIntrinsics | None = None
+    if not caminfo_messages:
+        first_msg = rgb_messages[0].message
+        w_f = int(getattr(first_msg, "width", 640) or 640)
+        h_f = int(getattr(first_msg, "height", 480) or 480)
+        fx_f = 605.0 * (w_f / 640.0)
+        fallback_intrinsics = capture.CameraIntrinsics(
+            fx=fx_f, fy=fx_f, cx=w_f / 2.0, cy=h_f / 2.0,
+            width=w_f, height=h_f, distortion_model="plumb_bob", d=[],
+        )
+        LOG.info("[BAG] No CameraInfo topic in bag; using standard %dx%d intrinsics (fx=%.1f, cx=%.1f, cy=%.1f)",
+                 w_f, h_f, fx_f, w_f / 2.0, h_f / 2.0)
 
     tf_dynamic = capture._extract_tf_records(tf_messages)
     tf_static = capture._extract_tf_records(tf_static_messages)
@@ -1286,6 +1319,67 @@ def main() -> None:
     max_depth_delta_ns = int(args.max_rgb_depth_delta_ms * 1e6)
     max_tf_delta_ns = int(args.max_tf_delta_ms * 1e6)
     max_odom_delta_ns = int(args.max_odom_delta_ms * 1e6)
+
+    # If odom provides world->base_footprint/base_link and /tf lacks it (or /tf has duplicate competing publishers), seed tf_dynamic from odom_records
+    if odom_records:
+        odom_child = normalize_frame(odom_records[0].child_frame_id or "base_footprint")
+        if odom_child and (odom_child not in tf_dynamic or len(tf_dynamic[odom_child]) > int(1.5 * len(odom_records))):
+            tf_dynamic[odom_child] = odom_records
+
+    # If the bag did not record /tf_static linking base_footprint/base_link -> camera_*_optical_frame,
+    # synthesize the standard ROS REP-103 optical-to-base static transform.
+    sample_cam_frame = args.camera_frame_id.strip()
+    if not sample_cam_frame:
+        src_msg = caminfo_messages[0].message if caminfo_messages else rgb_messages[0].message
+        sample_cam_frame = normalize_frame(getattr(getattr(src_msg, "header", None), "frame_id", ""))
+    if sample_cam_frame and sample_cam_frame not in tf_static and sample_cam_frame not in tf_dynamic:
+        base_candidates = [f for f in ("base_link", "base_footprint") if f in tf_dynamic or f in tf_static]
+        if base_candidates:
+            base_parent = base_candidates[0]
+            z_cam = 0.28
+            try:
+                d0_mm = capture._decode_depth_image_mm(depth_messages[0].message)
+                if d0_mm is not None:
+                    d0_m = d0_mm.astype(np.float32) / 1000.0
+                    h_d, w_d = d0_m.shape[:2]
+                    v_grid, _ = np.indices((h_d, w_d))
+                    valid_fl = (d0_m > 0.30) & (d0_m < 5.0) & (v_grid > int(0.62 * h_d))
+                    if int(np.sum(valid_fl)) > 100:
+                        cy_est = h_d / 2.0
+                        fy_est = 605.0 * (w_d / 640.0)
+                        y_down = (v_grid[valid_fl] - cy_est) * d0_m[valid_fl] / fy_est
+                        est_h = float(np.percentile(y_down, 90))
+                        if 0.15 <= est_h <= 1.60:
+                            z_cam = est_h
+            except Exception:
+                pass
+            if "optical" in sample_cam_frame.lower():
+                t_base_cam = [
+                    [0.0, 0.0, 1.0, 0.0],
+                    [-1.0, 0.0, 0.0, 0.0],
+                    [0.0, -1.0, 0.0, float(z_cam)],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            else:
+                t_base_cam = [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, float(z_cam)],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            tf_static[sample_cam_frame] = [
+                capture.ExtrinsicsRecord(
+                    source="synthetic_rep103_static",
+                    frame_id=base_parent,
+                    child_frame_id=sample_cam_frame,
+                    timestamp_ns=0,
+                    matrix_4x4=t_base_cam,
+                    translation_xyz=[0.0, 0.0, float(z_cam)],
+                    quaternion_xyzw=[-0.5, 0.5, -0.5, 0.5],
+                )
+            ]
+            LOG.info("[TF ] Synthesized missing /tf_static REP-103 optical link: %s -> %s (z_mount=%.3fm)",
+                     sample_cam_frame, base_parent, z_cam)
 
     tf_tree = TFTree(tf_dynamic, tf_static, max_tf_delta_ns)
     LOG.info("[TF ] dynamic frames: %s", sorted(tf_dynamic.keys()) or "(none)")
@@ -1423,10 +1517,13 @@ def main() -> None:
                 stats["skipped_no_depth"] += 1
                 continue
 
-            cam_idx = capture._closest_index(cam_ts, rgb_item.timestamp_ns, start_idx=cam_cursor)
-            cam_cursor = max(cam_cursor, cam_idx)
-            intr = capture._intrinsics_from_camera_info(caminfo_messages[cam_idx].message)
-            if not capture._is_intrinsics_sane(intr):
+            if caminfo_messages:
+                cam_idx = capture._closest_index(cam_ts, rgb_item.timestamp_ns, start_idx=cam_cursor)
+                cam_cursor = max(cam_cursor, cam_idx)
+                intr = capture._intrinsics_from_camera_info(caminfo_messages[cam_idx].message)
+            else:
+                intr = fallback_intrinsics
+            if intr is None or not capture._is_intrinsics_sane(intr):
                 stats["skipped_bad_intrinsics"] += 1
                 continue
 
@@ -1442,7 +1539,8 @@ def main() -> None:
 
             camera_frame_id = args.camera_frame_id.strip()
             if not camera_frame_id:
-                header = getattr(caminfo_messages[cam_idx].message, "header", None)
+                src_hdr_msg = caminfo_messages[cam_idx].message if caminfo_messages else rgb_item.message
+                header = getattr(src_hdr_msg, "header", None)
                 camera_frame_id = str(getattr(header, "frame_id", "")).strip()
 
             if not chain_logged:
